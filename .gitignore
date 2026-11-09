@@ -5,3 +5,15 @@ src-tauri/target
 src-tauri/gen
 test-results
 .demo-frames
+
+# local env / OS / editor noise
+.env
+.env.*
+*.log
+.DS_Store
+Thumbs.db
+*.pem
+*.key
+
+# design mockups (local only)
+design/
