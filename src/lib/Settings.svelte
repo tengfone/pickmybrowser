@@ -103,6 +103,34 @@
     endDrag();
   }
 
+  /*
+   * Reordering uses pointer events, not HTML5 drag-and-drop: the webviews intercept native
+   * drags (Windows file-drop handling, WebKitGTK quirks), so HTML5 DnD is unreliable here.
+   */
+  function rowIndexAt(x: number, y: number): number | null {
+    const row = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-browser-index]");
+    return row ? Number(row.dataset.browserIndex) : null;
+  }
+
+  function startRowDrag(e: PointerEvent, index: number) {
+    if (e.button !== 0 || (e.target as HTMLElement).closest("button, input, select, a")) return;
+    e.preventDefault();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    dragFrom = index;
+    dragOver = index;
+  }
+
+  function moveRowDrag(e: PointerEvent) {
+    if (dragFrom === null) return;
+    dragOver = rowIndexAt(e.clientX, e.clientY) ?? dragOver;
+  }
+
+  function endRowDrag() {
+    if (dragFrom === null) return;
+    if (dragOver !== null) dropOn(dragOver);
+    else endDrag();
+  }
+
   // Rules
 
   const saveRules = () => snap && api.saveRules($state.snapshot(snap.rules));
@@ -325,22 +353,14 @@
               <div
                 class="srow"
                 class:off={!b.enabled}
-                class:over={dragOver === i && dragFrom !== i}
+                class:over={dragOver === i && dragFrom !== null && dragFrom !== i}
+                class:dragging={dragFrom === i}
                 role="listitem"
-                draggable="true"
-                ondragstart={(e) => {
-                  dragFrom = i;
-                  e.dataTransfer?.setData("text/plain", String(i));
-                }}
-                ondragover={(e) => {
-                  e.preventDefault();
-                  dragOver = i;
-                }}
-                ondragend={endDrag}
-                ondrop={(e) => {
-                  e.preventDefault();
-                  dropOn(i);
-                }}
+                data-browser-index={i}
+                onpointerdown={(e) => startRowDrag(e, i)}
+                onpointermove={moveRowDrag}
+                onpointerup={endRowDrag}
+                onpointercancel={endDrag}
               >
                 <span class="grip" aria-hidden="true">⠿</span>
                 <Glyph id={b.id} family={b.family} name={b.name} />
@@ -516,7 +536,8 @@
   .srow:first-child { border-top: 0; }
   .srow.off :global(.ico), .srow.off .nm { opacity: 0.55; }
   .srow.over { box-shadow: inset 0 2px 0 var(--sig); }
-  .srow[draggable="true"] { cursor: grab; }
+  .srow[data-browser-index] { cursor: grab; user-select: none; touch-action: none; }
+  .srow.dragging { cursor: grabbing; opacity: 0.6; }
   .grip { color: var(--tx3); font-size: 14px; }
   .nm { flex: 1; font-weight: 500; min-width: 0; }
   .nm small { display: block; font: 11px/16px var(--mono); color: var(--tx3); font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

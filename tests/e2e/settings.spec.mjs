@@ -25,6 +25,19 @@ describe('Settings', () => {
     FIXTURE_BROWSERS.forEach((b, i) => expect(names[i]).toContain(b.name));
   });
 
+  it('dragging a browser reorders the list', async () => {
+    const before = (await invoke('snapshot')).browsers.map((b) => b.id);
+    const rows = await $$('main .srow[data-browser-index]');
+    await rows[0].dragAndDrop(rows[2]);
+    await browser.waitUntil(async () => (await invoke('snapshot')).browsers[2].id === before[0], {
+      timeoutMsg: 'drag did not reorder the browsers',
+    });
+    // Put the order back for the tests below.
+    await invoke('save_browsers', { browsers: (await invoke('snapshot')).browsers.sort((a, b) => before.indexOf(a.id) - before.indexOf(b.id)) });
+    await browser.refresh();
+    await expect($('h1=Browsers')).toBeDisplayed();
+  });
+
   it('disabling a browser persists', async () => {
     await $$('main .srow')[1].$('button[role="switch"]').click();
     await browser.waitUntil(async () => (await invoke('snapshot')).browsers[1].enabled === false);

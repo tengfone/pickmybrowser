@@ -4,17 +4,41 @@ Pick which browser opens every link. Set PickMyBrowser as your default browser a
 
 ![PickMyBrowser demo](assets/demo.gif)
 
-Windows, macOS and Linux. Small (≈4 MB app, ≈1.6 MB Windows installer), sits in the tray, and only runs when you start it or click a link.
+Works on **Windows**, **macOS** and **Linux**.
 
 ## Features
 
-- **Pick with one key:** `1`–`9` opens that browser, `↑`/`↓` + `Enter`, or click.
-- **Private windows:** hold `Shift` while picking.
-- **Profiles:** `→` lists a browser's profiles (Chrome, Edge, Brave, Firefox…), then press its letter.
-- **Rules:** send `*.figma.com` or `github.com/work/*` straight to a browser/profile after a short countdown (`Space` to cancel, or set it to open instantly).
-- **Safer links:** strips tracking parameters (`utm_*`, `fbclid`, …) and warns about lookalike domains such as `paypa1.com`. Lookalikes never auto-open.
-- **Recent links**, type-to-filter when you have more than 9 browsers, light/dark themes, picker at the cursor or centred.
-- Real browser icons, detected automatically.
+### ⚡ Fast picking
+- **One keypress.** Each browser gets a number from `1` to `9`. You can also use the arrow keys or click.
+- **Private windows.** Hold `Shift` while picking to open the link in a private or incognito window.
+- **Profiles.** Press `→` on a browser to list its profiles (Chrome, Edge, Brave, Firefox and more), then press the profile's letter.
+- **Type to filter.** If you have more than nine browsers, start typing to narrow the list.
+
+### 🎯 Rules
+- **Send links automatically.** Patterns like `*.figma.com` or `github.com/work/*` go straight to the browser and profile you choose.
+- **Your choice of timing.** A rule can wait for a short countdown (press `Space` to cancel) or open immediately.
+
+### 🛡️ Safer links
+- **Tracking removal.** Parameters such as `utm_*` and `fbclid` are removed before the link opens.
+- **Lookalike warnings.** Domains such as `paypa1.com` are flagged, and rules never open them automatically.
+
+### 🪶 Light and out of the way
+- **Small.** The app is about 4 MB, and the Windows installer is about 1.6 MB.
+- **Only runs when needed.** It sits in the tray and runs only when you start it or click a link.
+- **Automatic browser detection.** Installed browsers are found with their real icons.
+- **Recent links.** The picker keeps a list of links you opened recently.
+- **Your look.** Choose a light or dark theme, and show the picker at the cursor or in the centre of the screen.
+
+### ⌨️ Keyboard shortcuts
+
+| Key | Action |
+| --- | --- |
+| `1`–`9` | Open in that browser |
+| `↑` / `↓`, `Enter` | Move through the list and open the selected browser |
+| `Shift` + pick | Open in a private window |
+| `→` | Show the browser's profiles |
+| `Space` | Cancel a rule's countdown |
+| Type | Filter the list (more than 9 browsers) |
 
 ## Install
 

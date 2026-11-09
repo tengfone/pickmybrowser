@@ -63,13 +63,16 @@ describe('Picker', () => {
         const p = await w.outerPosition();
         return [p.x, p.y];
       });
-    // Nudge the window a little from where it appeared, as if the mouse had moved on since.
+    // Put the window somewhere with room to grow (near the top-left of its screen), so the
+    // only thing that could move it is the bug this test guards against. Near a screen edge
+    // the picker is allowed to shift just enough to stay visible.
     await browser.execute(async () => {
       const { WebviewWindow } = window.__TAURI__.webviewWindow;
       const { PhysicalPosition } = window.__TAURI__.dpi;
       const w = await WebviewWindow.getByLabel('picker');
-      const p = await w.outerPosition();
-      await w.setPosition(new PhysicalPosition(p.x + 40, p.y + 30));
+      const m = await window.__TAURI__.window.currentMonitor();
+      const area = m.workArea ?? { position: m.position };
+      await w.setPosition(new PhysicalPosition(area.position.x + 120, area.position.y + 90));
     });
     await browser.pause(200);
     const before = await position();
