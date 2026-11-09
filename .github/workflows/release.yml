@@ -1,0 +1,300 @@
+name: CI
+
+# Tests on every push to main and on PRs. A v* tag additionally builds all platforms
+# and creates a DRAFT GitHub release, published by hand. Tag with:
+#   npm run release:patch|minor|major   (bumps package.json + Cargo files, commits, tags, pushes)
+on:
+  push:
+    tags:
+      - 'v*'
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+env:
+  # Keep in sync with src-tauri/rust-toolchain.toml.
+  RUST_TOOLCHAIN: '1.97.0'
+
+jobs:
+  test:
+    timeout-minutes: 60
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-22.04]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version-file: .nvmrc
+          cache: 'npm'
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: src-tauri
+          key: test
+
+      # The wdio build embeds its own WebDriver server, so webkit2gtk-driver is not needed.
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf xdg-utils xvfb
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        if: runner.os == 'Linux'
+        run: npm run check
+
+      - name: Rust tests
+        working-directory: src-tauri
+        run: cargo test --lib
+
+      - name: E2E tests
+        if: runner.os != 'Linux'
+        run: npm run test:e2e
+
+      - name: E2E tests (Xvfb)
+        if: runner.os == 'Linux'
+        run: |
+          npm run build:e2e
+          xvfb-run -a npx wdio run wdio.conf.mjs
+
+      - name: Upload E2E logs and screenshots
+        if: failure()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: e2e-failure-${{ matrix.os }}
+          path: |
+            test-results/
+            *.log
+          if-no-files-found: ignore
+
+      - name: Release build smoke test
+        shell: bash
+        run: |
+          npx tauri build --no-bundle
+          if [ "$RUNNER_OS" = "Linux" ]; then xvfb-run -a npm run test:smoke; else npm run test:smoke; fi
+
+      - name: Report sizes (informational)
+        if: always()
+        continue-on-error: true
+        run: node scripts/report-size.cjs
+
+  build:
+    needs: [test]
+    # Tags build for release; a manual run builds the assets for inspection only (no release job).
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { os: windows-latest, name: win, args: '--bundles nsis' }
+          - { os: macos-latest, name: mac-arm64, target: aarch64-apple-darwin, args: '--target aarch64-apple-darwin --bundles app' }
+          # Cross-compiled on the arm64 runner; not smoke-tested.
+          - { os: macos-latest, name: mac-x64, target: x86_64-apple-darwin, args: '--target x86_64-apple-darwin --bundles app' }
+          - { os: ubuntu-22.04, name: linux, args: '--bundles appimage,deb,rpm' }
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version-file: .nvmrc
+          cache: 'npm'
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: src-tauri
+          key: ${{ matrix.name }}
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf xdg-utils
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Resolve version
+        shell: bash
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          CARGO_VERSION="$(awk '/^\[/{p=($0=="[package]")} p && /^version *=/{gsub(/.*= *"|".*/,""); print; exit}' src-tauri/Cargo.toml)"
+          if [[ "$CARGO_VERSION" != "$VERSION" ]]; then
+            echo "::error::src-tauri/Cargo.toml version '$CARGO_VERSION' does not match package.json version $VERSION"
+            exit 1
+          fi
+          if [[ "$GITHUB_REF" == refs/tags/v* && "${GITHUB_REF_NAME#v}" != "$VERSION" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $VERSION"
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      # Unsigned build; the steps below name and upload the assets.
+      - name: Build
+        shell: bash
+        run: npx tauri build ${{ matrix.args }}
+
+      - name: Collect release asset
+        shell: bash
+        run: |
+          mkdir -p dist
+          case "${{ matrix.name }}" in
+            win)   cp src-tauri/target/release/bundle/nsis/*-setup.exe "dist/PickMyBrowser-Setup-$VERSION.exe" ;;
+            mac-*) ditto -c -k --keepParent "src-tauri/target/${{ matrix.target }}/release/bundle/macos/PickMyBrowser.app" "dist/PickMyBrowser-$VERSION-${{ matrix.name }}.zip" ;;
+            linux)
+              cp src-tauri/target/release/bundle/appimage/*.AppImage "dist/PickMyBrowser-$VERSION.AppImage"
+              cp src-tauri/target/release/bundle/deb/*.deb "dist/PickMyBrowser-$VERSION-amd64.deb"
+              cp src-tauri/target/release/bundle/rpm/*.rpm "dist/PickMyBrowser-$VERSION-x86_64.rpm" ;;
+          esac
+          ls -la dist
+
+      - name: Check Linux packages
+        if: runner.os == 'Linux'
+        run: |
+          APP=$(ls dist/*.AppImage)
+          chmod +x "$APP"
+          (cd /tmp && "$GITHUB_WORKSPACE/$APP" --appimage-extract >/dev/null)
+          find /tmp/squashfs-root -name 'libayatana-appindicator3.so*' | grep -q . || { echo "libayatana-appindicator3 missing from AppImage"; exit 1; }
+          dpkg-deb -f dist/*.deb Depends | tee /dev/stderr | grep -q appindicator || { echo ".deb does not depend on appindicator"; exit 1; }
+          dpkg-deb -I dist/*.deb | grep -q prerm || { echo ".deb has no prerm (uninstall cleanup)"; exit 1; }
+
+      - name: Report sizes (informational)
+        if: always()
+        continue-on-error: true
+        run: node scripts/report-size.cjs
+
+      - name: Attest build provenance
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-path: dist/*
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: pickmybrowser-${{ matrix.name }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    needs: [build]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          path: artifacts
+          pattern: pickmybrowser-*
+          merge-multiple: true
+
+      - name: Collect release files
+        run: |
+          mkdir -p release
+          find artifacts -type f \( -name "*.exe" -o -name "*.zip" -o -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" \) -exec mv {} release/ \;
+          ls -la release
+
+      - name: Generate release notes
+        shell: bash
+        run: |
+          TAG="$GITHUB_REF_NAME"
+          VERSION="${TAG#v}"
+          PREV_TAG=$(git describe --tags --abbrev=0 --match "v*" "${TAG}^" 2>/dev/null || true)
+          RANGE="${PREV_TAG:+${PREV_TAG}..}${TAG}"
+
+          section() {
+            local title="$1" pattern="$2"
+            local entries
+            entries=$(git log "$RANGE" --no-merges --pretty=format:"- %s (%h)" -E --grep="$pattern" || true)
+            if [ -n "$entries" ]; then
+              printf '### %s\n%s\n\n' "$title" "$entries"
+            fi
+          }
+
+          {
+            printf '# PickMyBrowser %s\n\n' "$VERSION"
+            if [ -n "$PREV_TAG" ]; then
+              printf '## Changes since %s\n\n' "$PREV_TAG"
+            else
+              printf '## Initial release\n\n'
+            fi
+            section "New features" '^feat'
+            section "Bug fixes"    '^fix'
+            section "Performance"  '^perf'
+            section "Documentation" '^docs'
+
+            printf '## Installation\n\n'
+            printf -- '- **Windows:** run `PickMyBrowser-Setup-%s.exe` (per-user, no admin). Uninstall from Settings > Apps.\n' "$VERSION"
+            printf -- '- **macOS Apple Silicon:** unzip `PickMyBrowser-%s-mac-arm64.zip` and move it to Applications.\n' "$VERSION"
+            printf -- '- **macOS Intel:** unzip `PickMyBrowser-%s-mac-x64.zip` and move it to Applications.\n' "$VERSION"
+            printf -- '- **Linux:** `PickMyBrowser-%s-amd64.deb` (Debian/Ubuntu) or `PickMyBrowser-%s-x86_64.rpm` (Fedora/openSUSE). Advanced: `PickMyBrowser-%s.AppImage`.\n\n' "$VERSION" "$VERSION" "$VERSION"
+            printf 'The builds are unsigned. macOS: right-click the app > Open the first time. Windows: SmartScreen > More info > Run anyway.\n\n'
+
+            printf '## SHA-256 checksums\n\n```\n'
+            (cd release && sha256sum *)
+            printf '```\n'
+          } > release-notes.md
+
+          cat release-notes.md
+
+      # Created as a draft: review notes and assets, then publish by hand.
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --verify-tag \
+            --draft \
+            --title "PickMyBrowser ${GITHUB_REF_NAME#v}" \
+            --notes-file release-notes.md \
+            release/*
+
+      # Keep only the 10 newest published releases; drafts are never counted or deleted.
+      - name: Prune old releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release list --limit 1000 --exclude-drafts --json tagName,createdAt,isDraft \
+            --jq 'map(select(.isDraft | not)) | sort_by(.createdAt) | reverse | .[10:] | .[].tagName' |
+          while read -r tag; do
+            echo "Deleting release $tag"
+            gh release delete "$tag" --yes
+          done
