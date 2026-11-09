@@ -104,10 +104,12 @@
     if (!pending) return;
     cancelAnimationFrame(countdownFrame);
     try {
-      await api.open(pending.url, b.id, profileId, incognito);
-      pending = null;
+      // The backend moves on to the next waiting link (a new picker:show) or hides the picker.
+      const url = pending.url;
+      await api.open(url, b.id, profileId, incognito);
+      if (pending?.url === url) pending = null;
     } catch (e) {
-      error = String(e);
+      error = `Couldn't start ${b.name}: ${e}. Try another browser.`;
       resize();
     }
   }
@@ -125,8 +127,12 @@
 
   function close() {
     cancelAnimationFrame(countdownFrame);
-    pending = null;
-    api.dismiss();
+    mode = "list"; // stops a running countdown even if a frame is already queued
+    // The backend shows the next waiting link, if any, or hides the picker.
+    const url = pending?.url;
+    api.dismiss().then(() => {
+      if (pending?.url === url) pending = null;
+    });
   }
 
   function toggleProfiles(b: Browser, expand = expandedId !== b.id) {
@@ -140,6 +146,13 @@
     expandedId = null;
     selectedProfile = -1;
     resize();
+    scrollSelectedIntoView();
+  }
+
+  /** Keep the keyboard selection visible in a long (scrolling) list. */
+  async function scrollSelectedIntoView() {
+    await tick();
+    card?.querySelector(".row.on")?.scrollIntoView({ block: "nearest" });
   }
 
   async function copyUrl() {
@@ -150,6 +163,12 @@
   }
 
   function onRuleKey(e: KeyboardEvent) {
+    // A focused button (Tab) means "do that button": Enter on "Cancel" must cancel.
+    if (e.target instanceof HTMLButtonElement && (e.key === "Enter" || e.key === " ")) {
+      e.preventDefault();
+      e.target.click();
+      return;
+    }
     if (e.key === "Enter") {
       e.preventDefault();
       openRule();
@@ -172,11 +191,13 @@
         e.preventDefault();
         if (expanded && selectedProfile < expanded.profiles.length - 1) selectedProfile++;
         else if (selectedIndex < visibleBrowsers.length - 1) selectRow(selectedIndex + 1);
+        scrollSelectedIntoView();
         return true;
       case "ArrowUp":
         e.preventDefault();
         if (expanded && selectedProfile > 0) selectedProfile--;
         else if (selectedIndex > 0) selectRow(selectedIndex - 1);
+        scrollSelectedIntoView();
         return true;
       case "ArrowRight":
       case "Tab":
@@ -259,10 +280,10 @@
       return;
     }
     const pressed = digit ?? (/^Key([A-Z])$/.exec(e.code)?.[1].toLowerCase() || key);
-    // With more than nine browsers, letters type into the filter instead.
-    const letterBlocked = filterEnabled && !digit;
-    const hit = letterBlocked ? undefined : visibleBrowsers.find((b) => keys.get(b.id) === pressed);
-    if (hit && !filter) {
+    // With more than nine browsers, letters type into the filter, except that a custom
+    // letter key still opens its browser when nothing has been typed yet.
+    const hit = filter ? undefined : visibleBrowsers.find((b) => keys.get(b.id) === pressed);
+    if (hit) {
       e.preventDefault();
       open(hit, null, e.shiftKey);
       return;
@@ -280,6 +301,12 @@
   onMount(() => {
     const unlisteners = [
       listen<Pending>("picker:show", (ev) => show(ev.payload)),
+      listen<number>("picker:queued", (ev) => {
+        if (pending) {
+          pending.queued = ev.payload;
+          resize();
+        }
+      }),
       listen("settings:changed", async () => (snapshot = await api.snapshot())),
     ];
     api.pending().then((next) => next && show(next));
@@ -293,6 +320,12 @@
       removeEventListener("blur", onBlur);
     };
   });
+
+  /** The key shown on a row. While filtering, digits pick from the filtered list, so show that. */
+  function rowKey(b: Browser, i: number) {
+    if (filter) return i < HOTKEY_COUNT ? String(i + 1) : "·";
+    return keys.get(b.id)?.toUpperCase() ?? "·";
+  }
 
   /** Splits a name around the first filter match so the match can be highlighted. */
   function highlight(name: string) {
@@ -333,6 +366,8 @@
         <span>Lookalike domain: <code>{urlParts.host}</code> resembles <code>{pending.lookalike}</code>. Check before opening.</span>
       </div>
     {/if}
+
+    {#if pending.notice}<div class="err notice" role="alert">{pending.notice}</div>{/if}
 
     {#if mode === "rule" && ruleBrowser}
       <div class="rule">
@@ -391,7 +426,7 @@
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m9 6 6 6-6 6" /></svg>
               </button>
             {/if}
-            <span class="kbd">{keys.get(b.id)?.toUpperCase() ?? "·"}</span>
+            <span class="kbd">{rowKey(b, i)}</span>
           </li>
           {#if isExpanded}
             {#each b.profiles as profile, j (profile.id)}
@@ -427,7 +462,7 @@
         <span><span class="kbd">{os === "macos" ? "⇧" : "Shift"}</span> {privateHeld ? "held" : "private"}</span>
         {#if expandedId}<span><span class="kbd">Q</span><span class="kbd">W</span><span class="kbd">E</span> profile</span>
         {:else if anyProfiles}<span><span class="kbd">→</span> profiles</span>{/if}
-        <span class="r"><span class="kbd">Esc</span></span>
+        <span class="r">{#if pending.queued}<span class="more">{pending.queued} more waiting</span>{/if}<span class="kbd">Esc</span></span>
       {/if}
     </footer>
   {/if}
@@ -488,6 +523,8 @@
   .err { margin: 0 8px 8px; padding: 8px 10px; border-radius: 6px; font-size: 12px; color: var(--sigtx); background: color-mix(in srgb, var(--sig) 10%, transparent); }
   .foot { display: flex; align-items: center; gap: 14px; padding: 8px 14px; border-top: 1px solid var(--line); background: var(--surf2); font: 11px/16px var(--mono); color: var(--tx3); }
   .foot span { display: inline-flex; align-items: center; gap: 4px; }
-  .foot .r { margin-left: auto; }
+  .foot .r { margin-left: auto; gap: 10px; }
+  .foot .more { color: var(--tx); font-weight: 600; white-space: nowrap; }
+  .notice { margin-top: 8px; }
   .foot .kbd { height: 18px; min-width: 18px; }
 </style>

@@ -2,6 +2,7 @@
 //! Both are created lazily and only ever hidden, never closed, so reopening is instant.
 
 use crate::config;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{
     AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
     WindowEvent,
@@ -9,6 +10,8 @@ use tauri::{
 
 pub const PICKER: &str = "picker";
 const SETTINGS: &str = "settings";
+/// Whether the picker has gained focus since it was last shown (see the focus handler).
+static GOT_FOCUS: AtomicBool = AtomicBool::new(false);
 
 /// Returns the picker window, creating it (hidden) on first use.
 pub fn picker(app: &AppHandle) -> WebviewWindow {
@@ -31,8 +34,14 @@ pub fn picker(app: &AppHandle) -> WebviewWindow {
 
     let handle = window.clone();
     window.on_window_event(move |event| match event {
-        // Under WebDriver the window loses focus constantly, so it must stay up in E2E.
-        WindowEvent::Focused(false) if !config::is_e2e() => {
+        WindowEvent::Focused(true) => GOT_FOCUS.store(true, Ordering::SeqCst),
+        // Click-away closes the picker, but only once it really had focus: Windows may refuse
+        // to hand focus to a window another app's click launched, and the picker must not
+        // vanish before the user ever saw it. Under WebDriver focus flips constantly, so E2E
+        // keeps it up.
+        WindowEvent::Focused(false) if !config::is_e2e() && GOT_FOCUS.load(Ordering::SeqCst) => {
+            // Clicking away dismisses every waiting link (they stay in recents).
+            crate::clear_pending(handle.app_handle());
             let _ = handle.hide();
         }
         WindowEvent::CloseRequested { api, .. } => {
@@ -86,6 +95,9 @@ pub fn present_picker(app: &AppHandle, width: f64, height: f64, centered: bool) 
         let _ = window.set_position(PhysicalPosition::new(x.round() as i32, y.round() as i32));
     }
 
+    if !window.is_visible().unwrap_or(false) {
+        GOT_FOCUS.store(false, Ordering::SeqCst);
+    }
     window.show().map_err(|e| e.to_string())?;
     let _ = window.set_focus();
     Ok(())

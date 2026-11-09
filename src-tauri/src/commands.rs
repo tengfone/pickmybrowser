@@ -49,7 +49,7 @@ pub fn snapshot(app: AppHandle, st: State<AppState>) -> Snapshot {
 
 #[tauri::command]
 pub fn pending(st: State<AppState>) -> Option<Pending> {
-    st.pending.lock().unwrap().clone()
+    crate::front_pending(&st)
 }
 
 /// Called by the picker once it has rendered and measured itself.
@@ -64,9 +64,12 @@ pub fn resize_picker(app: AppHandle, width: f64, height: f64) -> Result<(), Stri
     app_windows::resize_picker(&app, width, height)
 }
 
+/// The front link was dismissed: drop it and show the next one, or hide the picker.
 #[tauri::command]
 pub fn dismiss(app: AppHandle) {
-    app_windows::hide_picker(&app);
+    if !crate::advance_pending(&app) {
+        app_windows::hide_picker(&app);
+    }
 }
 
 #[tauri::command]
@@ -87,8 +90,9 @@ pub fn open_url(
         }
         cfg.save();
     }
-    *st.pending.lock().unwrap() = None;
-    app_windows::hide_picker(&app);
+    if !crate::advance_pending(&app) {
+        app_windows::hide_picker(&app);
+    }
     Ok(())
 }
 
@@ -134,6 +138,14 @@ pub fn save_browsers(app: AppHandle, st: State<AppState>, mut browsers: Vec<Brow
         cfg.save();
     }
     tray::refresh(&app);
+}
+
+/// Which rule (index into `rules`) a URL would match, for the "Test a link" box. Uses the
+/// same matcher as real links; tracking stripping doesn't change the host/path it checks.
+#[tauri::command]
+pub fn test_rule(rules: Vec<Rule>, url: String) -> Option<usize> {
+    let url = if url.contains("://") { url } else { format!("https://{url}") };
+    rules.iter().position(|r| r.enabled && crate::urls::rule_matches(&r.pattern, &url))
 }
 
 #[tauri::command]

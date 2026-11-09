@@ -70,6 +70,31 @@ describe('Settings', () => {
     });
   });
 
+  it('rules can be reordered, tested, and a deleted rule restored with Undo', async () => {
+    await invoke('save_rules', {
+      rules: [
+        { pattern: '*.github.com', browserId: 'chrome', profileId: null, enabled: true },
+        { pattern: 'github.com/acme/*', browserId: 'firefox', profileId: null, enabled: true },
+      ],
+    });
+    await browser.refresh();
+    await $('nav.side').$('button*=Rules').click();
+    const patterns = async () => (await invoke('snapshot')).rules.map((r) => r.pattern);
+    // Test box: the broad rule wins first.
+    await $('input.test').setValue('https://github.com/acme/repo');
+    await expect($('.testres')).toHaveText(expect.stringContaining('Rule 1'));
+    // Move the specific rule up; now it wins.
+    await $('button[aria-label="Move rule github.com/acme/* up"]').click();
+    await browser.waitUntil(async () => (await patterns())[0] === 'github.com/acme/*');
+    await expect($('.testres')).toHaveText(expect.stringContaining('Firefox'));
+    // Delete, then Undo.
+    await $('button[aria-label="Delete rule for github.com/acme/*"]').click();
+    await browser.waitUntil(async () => (await patterns()).length === 1);
+    await $('.toast').$('button=Undo').click();
+    await browser.waitUntil(async () => (await patterns())[0] === 'github.com/acme/*');
+    await invoke('save_rules', { rules: [] });
+  });
+
   it('changes a preference', async () => {
     await $('nav.side').$('button*=General').click();
     await $('button[aria-label="Strip tracking"]').click();

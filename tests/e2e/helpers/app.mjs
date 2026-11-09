@@ -125,6 +125,8 @@ async function reloadCurrentWindow() {
 /** Send a link to the app the way the OS would, then focus the picker window. */
 export async function openLink(url) {
   await use('settings');
+  // Drop links left waiting by an earlier test so this one is in front.
+  for (let i = 0; i < 10 && (await invoke('pending')); i++) await invoke('dismiss');
   await invoke('pick_url', { url });
   await use('picker');
   await $('section.picker header.url').waitForDisplayed();

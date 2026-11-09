@@ -291,6 +291,10 @@ pub fn launch(b: &Browser, url: &str, profile: Option<&str>, private: bool) -> R
 /// E2E tests assert on `launches.jsonl` instead of starting real browsers.
 fn log_e2e_launch(b: &Browser, url: &str, profile: Option<&str>, private: bool, args: &[String]) -> Result<(), String> {
     use std::io::Write;
+    // Lets tests simulate an uninstalled browser.
+    if b.exec.ends_with("/missing") {
+        return Err("program not found".into());
+    }
     let line = serde_json::json!({ "browser": b.id, "url": url, "profile": profile, "private": private, "args": args });
     let mut file = std::fs::OpenOptions::new()
         .create(true)

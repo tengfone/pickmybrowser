@@ -41,6 +41,7 @@
     load();
     api.updateStatus().then((u) => (update = u));
     const unlistenUpdate = listen<UpdateInfo | null>("update:changed", (e) => (update = e.payload));
+    const unlistenProgress = listen<number>("update:progress", (e) => (updateProgress = e.payload));
     const unlistenTab = listen<Tab>("settings:tab", (e) => (tab = e.payload));
     const unlisten = listen("tauri://focus", () => load());
     const darkQuery = matchMedia("(prefers-color-scheme: dark)");
@@ -49,14 +50,24 @@
     return () => {
       unlisten.then((stop) => stop());
       unlistenUpdate.then((stop) => stop());
+      unlistenProgress.then((stop) => stop());
       unlistenTab.then((stop) => stop());
       darkQuery.removeEventListener("change", onSchemeChange);
     };
   });
 
-  function flash(message: string) {
+  let toastAction = $state<{ label: string; run: () => void } | null>(null);
+  let toastTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /** Show a short message; with an action (e.g. Undo) it stays up longer. */
+  function flash(message: string, action: { label: string; run: () => void } | null = null) {
+    clearTimeout(toastTimer);
     toast = message;
-    setTimeout(() => (toast = ""), 1800);
+    toastAction = action;
+    toastTimer = setTimeout(() => {
+      toast = "";
+      toastAction = null;
+    }, action ? 6000 : 1800);
   }
 
   // Browsers
@@ -173,9 +184,53 @@
 
   function removeRule(index: number) {
     if (!snap) return;
+    const removed = snap.rules[index];
     snap.rules = snap.rules.filter((_, i) => i !== index);
     saveRules();
+    flash(`Rule ${removed.pattern || "(empty)"} deleted`, {
+      label: "Undo",
+      run: () => {
+        if (!snap) return;
+        const rules = [...snap.rules];
+        rules.splice(Math.min(index, rules.length), 0, removed);
+        snap.rules = rules;
+        saveRules();
+      },
+    });
   }
+
+  /** Rules are checked top to bottom, so order matters. */
+  function moveRule(from: number, to: number) {
+    if (!snap || to < 0 || to >= snap.rules.length) return;
+    const rules = [...snap.rules];
+    const [moved] = rules.splice(from, 1);
+    rules.splice(to, 0, moved);
+    snap.rules = rules;
+    saveRules();
+  }
+
+  /** A pattern is host[/path]; anything with spaces or a scheme other than http(s) can't match. */
+  function patternProblem(pattern: string) {
+    const p = pattern.trim();
+    if (!p) return "Enter a site, like github.com";
+    if (/\s/.test(p)) return "No spaces";
+    if (/^[a-z]+:\/\//i.test(p) && !/^https?:\/\//i.test(p)) return "Only web links (http/https)";
+    if (p.replace(/^https?:\/\//i, "").startsWith("/")) return "Start with a site, like github.com/acme/*";
+    return "";
+  }
+
+  // "Test a link": shows which rule (if any) a URL would hit.
+  let testUrl = $state("");
+  let testHit = $state<number | null | undefined>(undefined);
+  $effect(() => {
+    const url = testUrl.trim();
+    const rules = snap ? $state.snapshot(snap.rules) : [];
+    if (!url) {
+      testHit = undefined;
+      return;
+    }
+    api.testRule(rules, url).then((hit) => (testHit = hit));
+  });
 
   function toggleRule(r: Rule) {
     r.enabled = !r.enabled;
@@ -211,15 +266,19 @@
 
   let update = $state<UpdateInfo | null>(null);
   let updateBusy = $state<"" | "checking" | "installing">("");
+  /** Download progress 0–100, -1 while the size is unknown. */
+  let updateProgress = $state(-1);
+  let updateError = $state("");
 
   async function checkForUpdates() {
     updateBusy = "checking";
+    updateError = "";
     try {
       update = await api.checkUpdate();
       if (snap) snap.settings.lastUpdateCheck = Math.floor(Date.now() / 1000);
       if (!update) flash("You're up to date");
     } catch (e) {
-      flash(`Update check failed: ${e}`);
+      updateError = `Couldn't check for updates. Check your connection and try again. (${e})`;
     } finally {
       updateBusy = "";
     }
@@ -229,10 +288,12 @@
     if (!update) return;
     if (update.manual) return api.openExternal(update.url);
     updateBusy = "installing";
+    updateProgress = -1;
+    updateError = "";
     try {
       await api.installUpdate(); // restarts the app on success
     } catch (e) {
-      flash(`Update failed: ${e}`);
+      updateError = `The update didn't install. Try again, or download it from GitHub. (${e})`;
       updateBusy = "";
     }
   }
@@ -428,14 +489,22 @@
 
         {:else if tab === "rules"}
           <div class="head">
-            <div><h1>Rules</h1><p class="sub">First match wins. Matching links skip the picker after a short countdown.</p></div>
+            <div><h1>Rules</h1><p class="sub">Links that match a rule skip the picker. Rules are checked top to bottom; the first match wins.</p></div>
             <button class="btn pri" onclick={addRule}>+ Add rule</button>
           </div>
           <div class="sec">{plural(snap.rules.length, "rule")}</div>
           <div class="card">
             {#each snap.rules as r, i}
-              <div class="srow">
-                <input class="pat" placeholder="*.example.com or github.com/acme/*" bind:value={r.pattern} onchange={saveRules} spellcheck="false" aria-label="URL pattern" />
+              {@const problem = r.pattern.trim() || i < snap.rules.length - 1 ? patternProblem(r.pattern) : ""}
+              <div class="srow rule" class:hit={testHit === i}>
+                <span class="mv">
+                  <button class="icon" aria-label={`Move rule ${r.pattern} up`} disabled={i === 0} onclick={() => moveRule(i, i - 1)}>↑</button>
+                  <button class="icon" aria-label={`Move rule ${r.pattern} down`} disabled={i === snap.rules.length - 1} onclick={() => moveRule(i, i + 1)}>↓</button>
+                </span>
+                <span class="patwrap">
+                  <input class="pat" class:bad={!!problem} placeholder="github.com or *.figma.com" bind:value={r.pattern} onchange={saveRules} spellcheck="false" aria-label="Site pattern" aria-invalid={!!problem} />
+                  {#if problem}<small class="patbad">{problem}</small>{/if}
+                </span>
                 <span class="arrow">→</span>
                 <select class="sel" value={ruleTarget(r)} onchange={(e) => setRuleTarget(r, e.currentTarget.value)} aria-label="Open with">
                   {#each snap.browsers as b}
@@ -443,12 +512,30 @@
                     {#each b.profiles as profile}<option value={`${b.id}::${profile.id}`}>{b.name} · {profile.name}</option>{/each}
                   {/each}
                 </select>
-                {@render toggle(r.enabled, "Rule enabled", () => toggleRule(r))}
-                <button class="icon" aria-label="Delete rule" onclick={() => removeRule(i)}>✕</button>
+                {@render toggle(r.enabled, `Rule for ${r.pattern || "empty pattern"} enabled`, () => toggleRule(r))}
+                <button class="icon" aria-label={`Delete rule for ${r.pattern || "empty pattern"}`} onclick={() => removeRule(i)}>✕</button>
               </div>
             {:else}
               <div class="srow empty"><span class="nm muted">No rules yet. Example: <code>meet.google.com</code> → Chrome · Work</span></div>
             {/each}
+          </div>
+          <details class="howto">
+            <summary>How patterns work</summary>
+            <ul>
+              <li><code>github.com</code> matches github.com and www.github.com, any page.</li>
+              <li><code>*.figma.com</code> matches figma.com and every subdomain, like www.figma.com or help.figma.com.</li>
+              <li><code>github.com/acme/*</code> matches only pages under github.com/acme/.</li>
+            </ul>
+          </details>
+          <div class="sec">Test a link</div>
+          <div class="card">
+            <div class="srow">
+              <input class="pat test" placeholder="Paste a link to see which rule it matches" bind:value={testUrl} spellcheck="false" aria-label="Link to test" />
+              <span class="testres" role="status">
+                {#if testHit === null}No rule matches. The picker will ask.
+                {:else if testHit !== undefined}{@const hit = snap.rules[testHit]}Rule {testHit + 1} ({hit?.pattern}) opens it in {findBrowser(hit?.browserId)?.name ?? "a browser"}{/if}
+              </span>
+            </div>
           </div>
           <div class="sec">Countdown</div>
           <div class="seg" role="group" aria-label="Countdown">
@@ -523,22 +610,34 @@
               {#if update}
                 <span class="nm">Version {update.version} is available<small>you have v{snap.version}{update.manual ? " · installed with your package manager" : ""}</small></span>
                 <button class="btn pri" disabled={updateBusy !== ""} onclick={installUpdate}>
-                  {update.manual ? "Download" : updateBusy === "installing" ? "Installing…" : "Install & restart"}
+                  {update.manual ? "Download" : updateBusy === "installing" ? (updateProgress >= 0 ? `Downloading ${updateProgress}%` : "Downloading…") : "Install & restart"}
                 </button>
               {:else}
                 <span class="nm">v{snap.version}<small>{snap.settings.lastUpdateCheck ? `last checked ${new Date(snap.settings.lastUpdateCheck * 1000).toLocaleString()}` : "not checked yet"}</small></span>
                 <button class="btn" disabled={updateBusy !== ""} onclick={checkForUpdates}>{updateBusy === "checking" ? "Checking…" : "Check for updates"}</button>
               {/if}
             </div>
+            {#if updateBusy === "installing"}
+              <div class="progress" role="progressbar" aria-label="Downloading update" aria-valuemin={0} aria-valuemax={100} aria-valuenow={updateProgress >= 0 ? updateProgress : undefined}>
+                <i class:indet={updateProgress < 0} style:width={updateProgress >= 0 ? `${updateProgress}%` : undefined}></i>
+              </div>
+            {/if}
+            {#if updateError}
+              <div class="srow upderr" role="alert">
+                <span class="nm">{updateError}</span>
+                <button class="btn" onclick={update ? installUpdate : checkForUpdates}>Try again</button>
+                {#if update}<button class="btn ghost" onclick={() => update && api.openExternal(update.url)}>Download</button>{/if}
+              </div>
+            {/if}
           </div>
           <div class="sec">Danger zone</div>
           <div class="card">
             <div class="srow"><span class="nm">Reset everything<small>browsers, rules, recents and preferences</small></span>
-              {#if confirmReset}<button class="btn ghost" onclick={() => (confirmReset = false)}>Cancel</button><button class="btn pri" onclick={resetEverything}>Reset</button>
+              {#if confirmReset}<button class="btn ghost" onclick={() => (confirmReset = false)}>Cancel</button><button class="btn destructive" onclick={resetEverything}>Delete {plural(snap.rules.length, "rule")} and reset</button>
               {:else}<button class="btn danger" onclick={() => (confirmReset = true)}>Reset all…</button>{/if}
             </div>
             <div class="srow"><span class="nm">Remove PickMyBrowser<small>removes default-browser registration, login item and all data, then quits{snap.os === "macos" ? "; then drag the app to the Bin" : ""}</small></span>
-              {#if confirmRemove}<button class="btn ghost" onclick={() => (confirmRemove = false)}>Cancel</button><button class="btn pri" onclick={() => api.uninstallApp()}>Remove &amp; quit</button>
+              {#if confirmRemove}<button class="btn ghost" onclick={() => (confirmRemove = false)}>Cancel</button><button class="btn destructive" onclick={() => api.uninstallApp()}>Remove &amp; quit</button>
               {:else}<button class="btn danger" onclick={() => (confirmRemove = true)}>Remove</button>{/if}
             </div>
           </div>
@@ -556,12 +655,12 @@
             </button>
           </div>
           <div class="sec">Uninstall</div>
-          <p class="hint">Run <code>PickMyBrowser --uninstall</code> to remove registrations and settings, then delete the app.</p>
+          <p class="hint">Use <b>General → Remove PickMyBrowser</b> to remove its registrations and settings, then uninstall the app as usual.</p>
         {/if}
       </main>
     </div>
   {/if}
-  {#if toast}<div class="toast" role="status">{toast}</div>{/if}
+  {#if toast}<div class="toast" role="status">{toast}{#if toastAction}<button class="toastact" onclick={() => { toastAction?.run(); toast = ""; toastAction = null; }}>{toastAction.label}</button>{/if}</div>{/if}
 {/if}
 
 <style>
@@ -612,7 +711,7 @@
   .nm small { display: block; font: 11px/16px var(--mono); color: var(--tx3); font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .nm.url { font: 13px/18px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .muted { color: var(--tx3); font-weight: 400; }
-  .muted code, .hint code { font: 12px var(--mono); color: var(--tx); }
+  .muted code { font: 12px var(--mono); color: var(--tx); }
   .hint { color: var(--tx3); font-size: 12px; margin-top: 10px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
   .mv { display: flex; gap: 2px; opacity: 0; transition: opacity 0.1s; }
   .srow:hover .mv, .srow:focus-within .mv { opacity: 1; }
@@ -650,7 +749,27 @@
   .ok { font: 11px var(--mono); color: var(--ok); }
   .spin { animation: spin 0.8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
-  .toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--tx); color: var(--bg); padding: 6px 14px; border-radius: 6px; font-size: 13px; font-weight: 500; }
+  .toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--tx); color: var(--bg); padding: 6px 14px; border-radius: 6px; font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 12px; }
+  .toastact { background: none; border: 0; padding: 0; font: 600 13px/20px var(--font); color: var(--bg); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+  /* Rules */
+  .srow.rule.hit { background: color-mix(in srgb, var(--ok) 12%, transparent); }
+  .patwrap { display: flex; flex-direction: column; flex: 1; min-width: 0; gap: 2px; }
+  .patwrap .pat { width: 100%; }
+  .pat.bad { border-color: var(--sigtx); }
+  .patbad { font-size: 11px; line-height: 14px; color: var(--sigtx); }
+  .pat.test { flex: 1; }
+  .testres { flex: 1; font-size: 12px; color: var(--tx2); }
+  .howto { margin: 8px 2px 0; font-size: 12px; color: var(--tx2); }
+  .howto summary { cursor: pointer; color: var(--tx); width: max-content; }
+  .howto ul { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 4px; }
+  .howto code { font: 12px var(--mono); color: var(--tx); }
+  /* Updates */
+  .progress { height: 4px; margin: 0 14px 10px; border-radius: 2px; background: var(--surf2); overflow: hidden; }
+  .progress i { display: block; height: 100%; background: var(--sig); transition: width 0.2s ease-out; }
+  .progress i.indet { width: 30%; animation: indet 1.2s ease-in-out infinite; }
+  @keyframes indet { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+  @media (prefers-reduced-motion: reduce) { .progress i.indet { animation: none; width: 100%; opacity: 0.5; } }
+  .upderr .nm { color: var(--sigtx); font-size: 12px; }
   /* onboarding */
   .onb { display: flex; flex-direction: column; height: 100vh; background: var(--surf); }
   .onb .in { flex: 1; padding: 28px 32px; overflow-y: auto; }

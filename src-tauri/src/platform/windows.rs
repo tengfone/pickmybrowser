@@ -127,8 +127,12 @@ pub fn set_default() -> Result<(), String> {
     register()?;
     // Windows 10/11 don't let apps set the default themselves; the user must confirm in Settings.
     let settings_uri = format!("ms-settings:defaultapps?registeredAppUser={APP_NAME}");
-    std::process::Command::new("cmd")
-        .args(["/C", "start", "", &settings_uri])
+    // rundll32 instead of `cmd /C start`: no console window flashes up.
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    std::process::Command::new("rundll32")
+        .args(["url.dll,FileProtocolHandler", &settings_uri])
+        .creation_flags(CREATE_NO_WINDOW)
         .spawn()
         .map(|_| ())
         .map_err(io_err)

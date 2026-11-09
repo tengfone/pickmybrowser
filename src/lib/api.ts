@@ -76,6 +76,10 @@ export interface Pending {
   lookalike: string | null;
   rule: Omit<Rule, "enabled"> | null;
   countdownMs: number;
+  /** Links waiting behind this one. */
+  queued: number;
+  /** Why the picker is showing instead of a rule's browser (it couldn't be started). */
+  notice: string | null;
 }
 
 /** Thin typed wrappers over the Rust commands. */
@@ -91,6 +95,8 @@ export const api = {
   rescan: () => invoke<Browser[]>("rescan"),
   saveBrowsers: (browsers: Browser[]) => invoke("save_browsers", { browsers }),
   saveRules: (rules: Rule[]) => invoke("save_rules", { rules }),
+  /** Index of the rule a URL would match, or null. */
+  testRule: (rules: Rule[], url: string) => invoke<number | null>("test_rule", { rules, url }),
   saveSettings: (settings: Settings) => invoke("save_settings", { settings }),
   clearRecents: () => invoke("clear_recents"),
   setDefault: () => invoke<boolean>("set_default"),

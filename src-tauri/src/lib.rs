@@ -32,11 +32,44 @@ pub struct Pending {
     lookalike: Option<String>,
     rule: Option<RuleHit>,
     countdown_ms: u64,
+    /// Links still waiting behind this one (clicked before this one was picked).
+    queued: usize,
+    /// Set when a rule's browser couldn't be started, so the picker can say why it's showing.
+    notice: Option<String>,
 }
 
 struct AppState {
     cfg: Mutex<Config>,
-    pending: Mutex<Option<Pending>>,
+    /// Links waiting for a browser, oldest first. The picker shows the front one.
+    pending: Mutex<std::collections::VecDeque<Pending>>,
+}
+
+/// The link the picker should show now, with the count of links waiting behind it.
+pub(crate) fn front_pending(state: &AppState) -> Option<Pending> {
+    let queue = state.pending.lock().unwrap();
+    queue.front().cloned().map(|mut p| {
+        p.queued = queue.len() - 1;
+        p
+    })
+}
+
+/// Forget every waiting link (the user clicked away from the picker).
+pub(crate) fn clear_pending(app: &AppHandle) {
+    app.state::<AppState>().pending.lock().unwrap().clear();
+}
+
+/// Drops the front link (opened or dismissed) and shows the next one, if any.
+/// Returns true when another link is now showing.
+pub(crate) fn advance_pending(app: &AppHandle) -> bool {
+    let state = app.state::<AppState>();
+    state.pending.lock().unwrap().pop_front();
+    match front_pending(&state) {
+        Some(next) => {
+            let _ = app.emit_to(app_windows::PICKER, "picker:show", next);
+            true
+        }
+        None => false,
+    }
 }
 
 /* ------------------------------------------------------------ url intake */
@@ -88,22 +121,56 @@ fn open_in_picker(app: &AppHandle, raw: &str) {
         cfg.push_recent(&url, None);
 
         // A rule with no countdown opens straight away, unless the link looks suspicious.
+        // If the browser won't start (uninstalled, moved), fall back to the picker instead
+        // of losing the link.
         let countdown_ms = cfg.settings.rule_countdown_ms;
         let open_immediately = countdown_ms == 0 && lookalike.is_none();
+        let mut notice = None;
+        let mut rule = rule;
         if open_immediately
-            && let Some(rule) = &rule
-            && let Some(browser) = cfg.browsers.iter().find(|b| b.id == rule.browser_id).cloned()
+            && let Some(hit) = &rule
+            && let Some(browser) = cfg.browsers.iter().find(|b| b.id == hit.browser_id).cloned()
         {
-            let _ = browsers::launch(&browser, &url, rule.profile_id.as_deref(), false);
-            cfg.save();
-            return;
+            match browsers::launch(&browser, &url, hit.profile_id.as_deref(), false) {
+                Ok(()) => {
+                    cfg.save();
+                    return;
+                }
+                Err(e) => {
+                    notice = Some(format!("{} couldn't be started ({e}). Pick another browser.", browser.name));
+                    rule = None;
+                }
+            }
         }
         cfg.save();
-        Pending { url, original: raw.into(), removed, lookalike, rule, countdown_ms }
+        Pending { url, original: raw.into(), removed, lookalike, rule, countdown_ms, queued: 0, notice }
     };
-    *state.pending.lock().unwrap() = Some(pending.clone());
+    let next = {
+        let mut queue = state.pending.lock().unwrap();
+        // The same link clicked twice in a row only needs picking once.
+        if queue.back().is_some_and(|p| p.url == pending.url) {
+            None
+        } else {
+            queue.push_back(pending);
+            Some(queue.len())
+        }
+    };
     app_windows::picker(app);
-    let _ = app.emit_to(app_windows::PICKER, "picker:show", pending);
+    match next {
+        // First in line: show it now.
+        Some(1) => {
+            let _ = app.emit_to(app_windows::PICKER, "picker:show", front_pending(&state));
+        }
+        // Others wait their turn. If the picker was closed (it hides when it loses focus),
+        // bring the waiting link back; otherwise just update its "N more" count.
+        _ => {
+            if app_windows::picker(app).is_visible().unwrap_or(false) {
+                let _ = app.emit_to(app_windows::PICKER, "picker:queued", state.pending.lock().unwrap().len() - 1);
+            } else {
+                let _ = app.emit_to(app_windows::PICKER, "picker:show", front_pending(&state));
+            }
+        }
+    }
 }
 
 /// Our own flags are only honoured as the sole argument (`pickmybrowser --background`), so a
@@ -132,7 +199,7 @@ fn show_settings_unless_link_arrives(app: &AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(400));
-        let has_pending = app.state::<AppState>().pending.lock().unwrap().is_some();
+        let has_pending = !app.state::<AppState>().pending.lock().unwrap().is_empty();
         if !has_pending {
             let handle = app.clone();
             let _ = app.run_on_main_thread(move || app_windows::show_settings(&handle));
@@ -191,7 +258,7 @@ pub fn run() {
         )
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(updates::UpdateState::default())
-        .manage(AppState { cfg: Mutex::new(load_config()), pending: Mutex::new(None) })
+        .manage(AppState { cfg: Mutex::new(load_config()), pending: Mutex::new(Default::default()) })
         .invoke_handler(tauri::generate_handler![
             commands::snapshot,
             commands::pending,
@@ -203,6 +270,7 @@ pub fn run() {
             commands::rescan,
             commands::save_browsers,
             commands::save_rules,
+            commands::test_rule,
             commands::save_settings,
             commands::clear_recents,
             commands::set_default,

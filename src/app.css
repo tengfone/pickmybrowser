@@ -56,6 +56,9 @@ input, textarea { user-select: text; }
 .btn.ghost { background: none; border-color: transparent; color: var(--tx2); }
 .btn.ghost:hover { background: var(--surf2); color: var(--tx); }
 .btn.danger { color: var(--sigtx); }
+/* Destructive confirms: outlined in the warning colour so they don't read like "Set as default". */
+.btn.destructive { background: none; color: var(--sigtx); border: 1.5px solid var(--sigtx); font-weight: 600; }
+.btn.destructive:hover { background: color-mix(in srgb, var(--sig) 12%, transparent); }
 .btn .kbd { height: 18px; }
 :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .chip { flex: none; font: 600 11px/16px var(--mono); border-radius: 4px; padding: 0 5px; display: inline-flex; gap: 4px; align-items: center; }

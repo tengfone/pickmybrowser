@@ -78,7 +78,8 @@ pub async fn check(app: &AppHandle) -> Result<Option<UpdateInfo>, String> {
     Ok(result)
 }
 
-/// Downloads, verifies and installs the pending update, then restarts.
+/// Downloads, verifies and installs the pending update, then restarts. Progress goes to the
+/// settings window as `update:progress` (0–100, or -1 when the size is unknown).
 /// On Windows the NSIS installer closes the app itself.
 pub async fn install(app: &AppHandle) -> Result<(), String> {
     if !can_self_update() {
@@ -86,7 +87,19 @@ pub async fn install(app: &AppHandle) -> Result<(), String> {
     }
     let update = app.state::<UpdateState>().0.lock().unwrap().clone();
     let Some(update) = update else { return Err("no update available".into()) };
-    update.download_and_install(|_, _| {}, || {}).await.map_err(|e| e.to_string())?;
+    let progress_app = app.clone();
+    let mut downloaded: u64 = 0;
+    update
+        .download_and_install(
+            move |chunk, total| {
+                downloaded += chunk as u64;
+                let percent = total.filter(|t| *t > 0).map(|t| (downloaded * 100 / t).min(100) as i64).unwrap_or(-1);
+                let _ = progress_app.emit("update:progress", percent);
+            },
+            || {},
+        )
+        .await
+        .map_err(|e| e.to_string())?;
     app.restart();
 }
 

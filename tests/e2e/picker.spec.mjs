@@ -115,6 +115,20 @@ describe('Picker', () => {
     expect(r).toMatchObject({ url: 'https://example.com/recent', browserId: 'edge' });
   });
 
+  it('links clicked before picking wait their turn', async () => {
+    await openLink('https://example.com/first');
+    await use('settings');
+    await invoke('pick_url', { url: 'https://example.com/second' });
+    await use('picker');
+    await expect($('.foot .more')).toHaveText('1 more waiting');
+    await browser.keys('1');
+    expect((await waitForLaunch())[0].url).toBe('https://example.com/first');
+    // The second link takes its place.
+    await expect($('header.url')).toHaveText(expect.stringContaining('second'));
+    await browser.keys('2');
+    expect((await waitForLaunch(2))[1].url).toBe('https://example.com/second');
+  });
+
   it('a custom key opens its browser; the others keep their numbers', async () => {
     await use('settings');
     const browsers = (await invoke('snapshot')).browsers;
