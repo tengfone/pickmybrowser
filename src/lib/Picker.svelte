@@ -457,8 +457,7 @@
   .list { padding: 4px; list-style: none; max-height: 376px; overflow-y: auto; scrollbar-width: thin; }
   .row { position: relative; display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 12px; border-radius: 6px; cursor: pointer; }
   .row.on { background: var(--sel); }
-  .row.on::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px; border-radius: 2px; background: var(--sig); }
-  .row.on .kbd { color: var(--tx); border-color: var(--tx3); }
+  .row.on .kbd { color: #fff; background: var(--sig); border-color: var(--sig); }
   .nm { font-weight: 500; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .nm small { font-weight: 400; color: var(--tx3); font-size: 13px; }
   .nm mark { background: none; color: var(--sigtx); font-weight: 700; text-decoration: underline; }

@@ -73,6 +73,20 @@ jobs:
         if: runner.os == 'Linux'
         run: npm run check
 
+      # Advisory only: reports known vulnerabilities without failing the build.
+      - name: Security audit (npm)
+        if: runner.os == 'Linux'
+        continue-on-error: true
+        run: npm audit --audit-level=low
+
+      - name: Security audit (cargo)
+        if: runner.os == 'Linux'
+        continue-on-error: true
+        working-directory: src-tauri
+        run: |
+          cargo install cargo-audit --locked --quiet
+          cargo audit
+
       - name: Rust tests
         working-directory: src-tauri
         run: cargo test --lib
