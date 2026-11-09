@@ -8,7 +8,17 @@ on:
     tags:
       - 'v*'
     branches: [main]
+    # Docs-only changes skip the build. (GitHub ignores path filters for tag pushes,
+    # so releases always build.)
+    paths-ignore:
+      - '**.md'
+      - 'assets/**'
+      - 'LICENSE'
   pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'assets/**'
+      - 'LICENSE'
   workflow_dispatch:
 
 permissions:
