@@ -77,15 +77,15 @@ pub fn is_e2e() -> bool {
 
 pub fn dir() -> PathBuf {
     // E2E builds keep their state in a throwaway folder chosen by the test runner.
-    if is_e2e() {
-        if let Some(d) = std::env::var_os("PMB_CONFIG_DIR") {
-            return PathBuf::from(d);
-        }
+    if is_e2e()
+        && let Some(d) = std::env::var_os("PMB_CONFIG_DIR")
+    {
+        return PathBuf::from(d);
     }
     // Separate from the legacy WPF app (%AppData%\PickMyBrowser) so the two never clash.
     dirs::config_dir()
         .unwrap_or_else(std::env::temp_dir)
-        .join("com.tengfone.pickmybrowser")
+        .join(crate::cleanup::IDENTIFIER)
 }
 
 fn path() -> PathBuf {
@@ -100,13 +100,13 @@ impl Config {
             .unwrap_or_default()
     }
 
+    /// Writes via a temp file + rename so a crash mid-write can't corrupt the config.
     pub fn save(&self) {
+        let Ok(json) = serde_json::to_string_pretty(self) else { return };
         let _ = fs::create_dir_all(dir());
-        if let Ok(s) = serde_json::to_string_pretty(self) {
-            let tmp = path().with_extension("json.tmp");
-            if fs::write(&tmp, s).is_ok() {
-                let _ = fs::rename(tmp, path());
-            }
+        let tmp = path().with_extension("json.tmp");
+        if fs::write(&tmp, json).is_ok() {
+            let _ = fs::rename(tmp, path());
         }
     }
 
@@ -123,21 +123,22 @@ impl Config {
         self.recents.truncate(self.settings.recent_limit.max(1));
     }
 
-    /// Merge freshly detected browsers with saved order/enabled/hotkey state.
+    /// Merge freshly detected browsers with the saved list: keep the user's order and
+    /// enabled flags, drop browsers that are gone, append new ones at the end.
     pub fn merge_detected(&mut self, detected: Vec<Browser>) {
-        let mut out: Vec<Browser> = Vec::new();
-        for old in &self.browsers {
-            if let Some(new) = detected.iter().find(|b| b.id == old.id) {
-                let mut b = new.clone();
-                b.enabled = old.enabled;
-                out.push(b);
+        let mut merged: Vec<Browser> = Vec::new();
+        for saved in &self.browsers {
+            if let Some(found) = detected.iter().find(|b| b.id == saved.id) {
+                let mut browser = found.clone();
+                browser.enabled = saved.enabled;
+                merged.push(browser);
             }
         }
-        for b in detected {
-            if !out.iter().any(|o| o.id == b.id) {
-                out.push(b);
+        for browser in detected {
+            if !merged.iter().any(|m| m.id == browser.id) {
+                merged.push(browser);
             }
         }
-        self.browsers = out;
+        self.browsers = merged;
     }
 }

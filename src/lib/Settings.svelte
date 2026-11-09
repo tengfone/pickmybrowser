@@ -5,115 +5,211 @@
   import Glyph from "./Glyph.svelte";
   import { loadIcons } from "./icons.svelte";
 
+  type Tab = "browsers" | "rules" | "recents" | "general" | "about";
+
+  const TABS: [Tab, string][] = [
+    ["browsers", "Browsers"],
+    ["rules", "Rules"],
+    ["recents", "Recent links"],
+    ["general", "General"],
+    ["about", "About"],
+  ];
+  const COUNTDOWN_OPTIONS: [number, string][] = [[0, "Off"], [800, "0.8 s"], [1200, "1.2 s"], [2000, "2 s"]];
+  const THEME_OPTIONS: [Settings["theme"], string][] = [["system", "System"], ["dark", "Dark"], ["light", "Light"]];
+  const RECENT_LIMITS = [10, 20, 50];
+  const DEFAULT_POLL_MS = 1500;
+  const DEFAULT_POLL_TIMEOUT_MS = 60_000;
+
   let snap = $state<Snapshot | null>(null);
-  let tab = $state<"browsers" | "rules" | "recents" | "general" | "about">("browsers");
-  let step = $state(1);
-  let busy = $state(false);
+  let tab = $state<Tab>("browsers");
+  let onboardingStep = $state(1);
+  let scanning = $state(false);
   let dragFrom = $state<number | null>(null);
   let dragOver = $state<number | null>(null);
   let confirmReset = $state(false);
   let confirmRemove = $state(false);
   let toast = $state("");
 
-  const tabs = [
-    ["browsers", "Browsers"], ["rules", "Rules"], ["recents", "Recent links"], ["general", "General"], ["about", "About"],
-  ] as const;
+  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
   async function load() {
     snap = await api.snapshot();
     applyTheme(snap.settings.theme);
   }
+
   onMount(() => {
     load();
-    const un = listen("tauri://focus", () => load());
-    const mq = matchMedia("(prefers-color-scheme: dark)");
-    const onMq = () => snap && applyTheme(snap.settings.theme);
-    mq.addEventListener("change", onMq);
-    return () => { un.then((f) => f()); mq.removeEventListener("change", onMq); };
+    const unlisten = listen("tauri://focus", () => load());
+    const darkQuery = matchMedia("(prefers-color-scheme: dark)");
+    const onSchemeChange = () => snap && applyTheme(snap.settings.theme);
+    darkQuery.addEventListener("change", onSchemeChange);
+    return () => {
+      unlisten.then((stop) => stop());
+      darkQuery.removeEventListener("change", onSchemeChange);
+    };
   });
 
-  function flash(msg: string) { toast = msg; setTimeout(() => (toast = ""), 1800); }
+  function flash(message: string) {
+    toast = message;
+    setTimeout(() => (toast = ""), 1800);
+  }
 
-  /* browsers */
+  // Browsers
+
   const saveBrowsers = () => snap && api.saveBrowsers($state.snapshot(snap.browsers));
+
   async function rescan() {
     if (!snap) return;
-    busy = true;
+    scanning = true;
     snap.browsers = await api.rescan();
     loadIcons(true);
-    busy = false;
-    flash(`Found ${snap.browsers.length} browser${snap.browsers.length === 1 ? "" : "s"}`);
+    scanning = false;
+    flash(`Found ${plural(snap.browsers.length, "browser")}`);
   }
+
   function move(from: number, to: number) {
     if (!snap || from === to || to < 0 || to >= snap.browsers.length) return;
-    const list = [...snap.browsers];
-    const [b] = list.splice(from, 1);
-    list.splice(to, 0, b);
-    snap.browsers = list;
+    const reordered = [...snap.browsers];
+    const [moved] = reordered.splice(from, 1);
+    reordered.splice(to, 0, moved);
+    snap.browsers = reordered;
     saveBrowsers();
   }
-  function toggleBrowser(b: Browser) { b.enabled = !b.enabled; saveBrowsers(); }
-  const enabledIndex = (b: Browser) => snap!.browsers.filter((x) => x.enabled).indexOf(b);
 
-  /* rules */
+  function toggleBrowser(b: Browser) {
+    b.enabled = !b.enabled;
+    saveBrowsers();
+  }
+
+  /** The picker hotkey shown for a browser: its position among enabled browsers, if within 1–9. */
+  function hotkeyLabel(b: Browser) {
+    if (!snap || !b.enabled) return "–";
+    const index = snap.browsers.filter((x) => x.enabled).indexOf(b);
+    return index < 9 ? String(index + 1) : "–";
+  }
+
+  function endDrag() {
+    dragFrom = null;
+    dragOver = null;
+  }
+
+  function dropOn(index: number) {
+    if (dragFrom !== null) move(dragFrom, index);
+    endDrag();
+  }
+
+  // Rules
+
   const saveRules = () => snap && api.saveRules($state.snapshot(snap.rules));
+
   function addRule() {
     if (!snap) return;
-    snap.rules = [...snap.rules, { pattern: "", browserId: snap.browsers[0]?.id ?? "", profileId: null, enabled: true }];
-  }
-  function removeRule(i: number) { if (!snap) return; snap.rules = snap.rules.filter((_, j) => j !== i); saveRules(); }
-  function ruleTarget(r: Rule) { return r.profileId ? `${r.browserId}::${r.profileId}` : r.browserId; }
-  function setRuleTarget(r: Rule, v: string) {
-    const [b, p] = v.split("::");
-    r.browserId = b; r.profileId = p ?? null; saveRules();
+    const browserId = snap.browsers[0]?.id ?? "";
+    snap.rules = [...snap.rules, { pattern: "", browserId, profileId: null, enabled: true }];
   }
 
-  /* settings */
-  function setS<K extends keyof Settings>(k: K, v: Settings[K]) {
+  function removeRule(index: number) {
     if (!snap) return;
-    snap.settings[k] = v;
-    if (k === "theme") applyTheme(v as Settings["theme"]);
+    snap.rules = snap.rules.filter((_, i) => i !== index);
+    saveRules();
+  }
+
+  function toggleRule(r: Rule) {
+    r.enabled = !r.enabled;
+    saveRules();
+  }
+
+  /** Rules target a browser, optionally a profile; the <select> encodes both as "browser::profile". */
+  function ruleTarget(r: Rule) {
+    return r.profileId ? `${r.browserId}::${r.profileId}` : r.browserId;
+  }
+
+  function setRuleTarget(r: Rule, value: string) {
+    const [browserId, profileId] = value.split("::");
+    r.browserId = browserId;
+    r.profileId = profileId ?? null;
+    saveRules();
+  }
+
+  // Preferences
+
+  function setSetting<K extends keyof Settings>(key: K, value: Settings[K]) {
+    if (!snap) return;
+    snap.settings[key] = value;
+    if (key === "theme") applyTheme(value as Settings["theme"]);
     api.saveSettings($state.snapshot(snap.settings));
   }
+
+  function toggleSetting(key: "showTray" | "stripTracking" | "warnLookalike" | "storeRecents") {
+    if (snap) setSetting(key, !snap.settings[key]);
+  }
+
+  /** The OS may need the user to confirm, so poll until it reports us as default (or give up). */
   async function makeDefault() {
     if (!snap) return;
     try {
       snap.isDefault = await api.setDefault();
-      if (!snap.isDefault) {
-        flash(snap.os === "windows" ? "Pick PickMyBrowser in Default apps" : "Waiting for confirmation…");
-        const t = setInterval(async () => {
-          if (!snap) return clearInterval(t);
-          snap.isDefault = await api.isDefault();
-          if (snap.isDefault) clearInterval(t);
-        }, 1500);
-        setTimeout(() => clearInterval(t), 60000);
-      }
-    } catch (e) { flash(String(e)); }
+      if (snap.isDefault) return;
+      flash(snap.os === "windows" ? "Pick PickMyBrowser in Default apps" : "Waiting for confirmation…");
+      const poll = setInterval(async () => {
+        if (!snap) return clearInterval(poll);
+        snap.isDefault = await api.isDefault();
+        if (snap.isDefault) clearInterval(poll);
+      }, DEFAULT_POLL_MS);
+      setTimeout(() => clearInterval(poll), DEFAULT_POLL_TIMEOUT_MS);
+    } catch (e) {
+      flash(String(e));
+    }
   }
-  async function toggleLogin() {
+
+  async function toggleLaunchAtLogin() {
     if (!snap) return;
     const on = !snap.launchAtLogin;
-    try { await api.setLaunchAtLogin(on); snap.launchAtLogin = on; } catch (e) { flash(String(e)); }
+    try {
+      await api.setLaunchAtLogin(on);
+      snap.launchAtLogin = on;
+    } catch (e) {
+      flash(String(e));
+    }
   }
-  async function reset() {
+
+  async function resetEverything() {
     if (!snap) return;
     await api.resetAll();
     loadIcons(true);
     confirmReset = false;
     await load();
-    step = 1;
+    onboardingStep = 1;
     flash("Everything reset");
   }
-  function finishOnboarding() { setS("onboarded", true); }
 
-  const fmtAgo = (s: number) => {
-    const d = Date.now() / 1000 - s;
-    if (d < 60) return "just now";
-    if (d < 3600) return `${Math.floor(d / 60)}m ago`;
-    if (d < 86400) return `${Math.floor(d / 3600)}h ago`;
-    return `${Math.floor(d / 86400)}d ago`;
-  };
-  const bName = (id?: string | null) => snap?.browsers.find((b) => b.id === id);
+  // Recents
+
+  async function clearRecents() {
+    await api.clearRecents();
+    if (snap) snap.recents = [];
+  }
+
+  function copyRecent(url: string) {
+    navigator.clipboard.writeText(url);
+    flash("Copied");
+  }
+
+  function timeAgo(epochSeconds: number) {
+    const seconds = Date.now() / 1000 - epochSeconds;
+    if (seconds < 60) return "just now";
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+    return `${Math.floor(seconds / 86400)}d ago`;
+  }
+
+  const findBrowser = (id?: string | null) => snap?.browsers.find((b) => b.id === id);
+
+  function defaultBrowserHint(os: Snapshot["os"]) {
+    if (os === "windows") return "Windows will open Default apps — choose PickMyBrowser for HTTP and HTTPS.";
+    if (os === "macos") return "macOS will ask you to confirm.";
+    return "We'll register with xdg-settings.";
+  }
 </script>
 
 {#snippet toggle(on: boolean, label: string, fn: () => void)}
@@ -122,12 +218,11 @@
 
 {#if snap}
   {#if !snap.settings.onboarded}
-    <!-- ---------------------------------------------------------------- onboarding -->
     <div class="onb">
       <div class="in">
-        <div class="steps"><i class="d"></i><i class:d={step === 2}></i></div>
-        {#if step === 1}
-          <h1>We found {snap.browsers.length} browser{snap.browsers.length === 1 ? "" : "s"}</h1>
+        <div class="steps"><i class="d"></i><i class:d={onboardingStep === 2}></i></div>
+        {#if onboardingStep === 1}
+          <h1>We found {plural(snap.browsers.length, "browser")}</h1>
           <p>Uncheck any you don't want in the picker. You can reorder them later.</p>
           <div class="card">
             {#each snap.browsers as b (b.id)}
@@ -145,8 +240,7 @@
           <h1>Make it your default</h1>
           <p>
             Links from any app will open the picker.
-            {snap.os === "windows" ? "Windows will open Default apps — choose PickMyBrowser for HTTP and HTTPS." :
-             snap.os === "macos" ? "macOS will ask you to confirm." : "We'll register with xdg-settings."}
+            {defaultBrowserHint(snap.os)}
           </p>
           <div class="card">
             <div class="srow">
@@ -162,19 +256,18 @@
         {/if}
       </div>
       <div class="ft">
-        <small>Step {step} of 2</small>
-        {#if step === 1}
-          <button class="btn pri" onclick={() => (step = 2)} disabled={!snap.browsers.length}>Continue</button>
+        <small>Step {onboardingStep} of 2</small>
+        {#if onboardingStep === 1}
+          <button class="btn pri" onclick={() => (onboardingStep = 2)} disabled={!snap.browsers.length}>Continue</button>
         {:else}
-          <span class="row-gap"><button class="btn ghost" onclick={() => (step = 1)}>Back</button><button class="btn pri" onclick={finishOnboarding}>Done</button></span>
+          <span class="row-gap"><button class="btn ghost" onclick={() => (onboardingStep = 1)}>Back</button><button class="btn pri" onclick={() => setSetting("onboarded", true)}>Done</button></span>
         {/if}
       </div>
     </div>
   {:else}
-    <!-- ---------------------------------------------------------------- settings -->
     <div class="shell">
       <nav class="side" aria-label="Settings sections">
-        {#each tabs as [id, label]}
+        {#each TABS as [id, label]}
           <button class:on={tab === id} aria-current={tab === id ? "page" : undefined} onclick={() => (tab = id)}>{label}</button>
         {/each}
         <div class="ver">
@@ -186,21 +279,33 @@
         {#if tab === "browsers"}
           <div class="head">
             <div><h1>Browsers</h1><p class="sub">Drag to reorder. Order sets the 1–9 hotkeys.</p></div>
-            <button class="btn" onclick={rescan} disabled={busy}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" class:spin={busy}><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5" /></svg>
-              {busy ? "Scanning…" : "Rescan"}
+            <button class="btn" onclick={rescan} disabled={scanning}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" class:spin={scanning}><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5" /></svg>
+              {scanning ? "Scanning…" : "Rescan"}
             </button>
           </div>
           <div class="sec">Detected · {snap.browsers.length}</div>
           <div class="card" role="list">
             {#each snap.browsers as b, i (b.id)}
               <div
-                class="srow" class:off={!b.enabled} class:over={dragOver === i && dragFrom !== i} role="listitem"
+                class="srow"
+                class:off={!b.enabled}
+                class:over={dragOver === i && dragFrom !== i}
+                role="listitem"
                 draggable="true"
-                ondragstart={(e) => { dragFrom = i; e.dataTransfer?.setData("text/plain", String(i)); }}
-                ondragover={(e) => { e.preventDefault(); dragOver = i; }}
-                ondragend={() => { dragFrom = null; dragOver = null; }}
-                ondrop={(e) => { e.preventDefault(); if (dragFrom !== null) move(dragFrom, i); dragFrom = null; dragOver = null; }}
+                ondragstart={(e) => {
+                  dragFrom = i;
+                  e.dataTransfer?.setData("text/plain", String(i));
+                }}
+                ondragover={(e) => {
+                  e.preventDefault();
+                  dragOver = i;
+                }}
+                ondragend={endDrag}
+                ondrop={(e) => {
+                  e.preventDefault();
+                  dropOn(i);
+                }}
               >
                 <span class="grip" aria-hidden="true">⠿</span>
                 <Glyph id={b.id} family={b.family} name={b.name} />
@@ -209,7 +314,7 @@
                   <button class="icon" aria-label="Move up" disabled={i === 0} onclick={() => move(i, i - 1)}>↑</button>
                   <button class="icon" aria-label="Move down" disabled={i === snap.browsers.length - 1} onclick={() => move(i, i + 1)}>↓</button>
                 </span>
-                <span class="kbd">{b.enabled && enabledIndex(b) < 9 ? enabledIndex(b) + 1 : "–"}</span>
+                <span class="kbd">{hotkeyLabel(b)}</span>
                 {@render toggle(b.enabled, `Show ${b.name} in picker`, () => toggleBrowser(b))}
               </div>
             {:else}
@@ -223,7 +328,7 @@
             <div><h1>Rules</h1><p class="sub">First match wins. Matching links skip the picker after a short countdown.</p></div>
             <button class="btn pri" onclick={addRule}>+ Add rule</button>
           </div>
-          <div class="sec">{snap.rules.length} rule{snap.rules.length === 1 ? "" : "s"}</div>
+          <div class="sec">{plural(snap.rules.length, "rule")}</div>
           <div class="card">
             {#each snap.rules as r, i}
               <div class="srow">
@@ -232,10 +337,10 @@
                 <select class="sel" value={ruleTarget(r)} onchange={(e) => setRuleTarget(r, e.currentTarget.value)} aria-label="Open with">
                   {#each snap.browsers as b}
                     <option value={b.id}>{b.name}</option>
-                    {#each b.profiles as p}<option value={`${b.id}::${p.id}`}>{b.name} · {p.name}</option>{/each}
+                    {#each b.profiles as profile}<option value={`${b.id}::${profile.id}`}>{b.name} · {profile.name}</option>{/each}
                   {/each}
                 </select>
-                {@render toggle(r.enabled, "Rule enabled", () => { r.enabled = !r.enabled; saveRules(); })}
+                {@render toggle(r.enabled, "Rule enabled", () => toggleRule(r))}
                 <button class="icon" aria-label="Delete rule" onclick={() => removeRule(i)}>✕</button>
               </div>
             {:else}
@@ -244,8 +349,8 @@
           </div>
           <div class="sec">Countdown</div>
           <div class="seg" role="group" aria-label="Countdown">
-            {#each [[0, "Off"], [800, "0.8 s"], [1200, "1.2 s"], [2000, "2 s"]] as [ms, l]}
-              <button aria-pressed={snap.settings.ruleCountdownMs === ms} onclick={() => setS("ruleCountdownMs", ms as number)}>{l}</button>
+            {#each COUNTDOWN_OPTIONS as [ms, label]}
+              <button aria-pressed={snap.settings.ruleCountdownMs === ms} onclick={() => setSetting("ruleCountdownMs", ms)}>{label}</button>
             {/each}
           </div>
           <p class="hint">Off opens immediately. Lookalike-domain warnings always stop and show the picker.</p>
@@ -253,15 +358,15 @@
         {:else if tab === "recents"}
           <div class="head">
             <div><h1>Recent links</h1><p class="sub">Stored only on this device.</p></div>
-            <button class="btn" onclick={async () => { await api.clearRecents(); snap!.recents = []; }} disabled={!snap.recents.length}>Clear</button>
+            <button class="btn" onclick={clearRecents} disabled={!snap.recents.length}>Clear</button>
           </div>
           <div class="card">
             {#each snap.recents as r}
-              {@const b = bName(r.browserId)}
+              {@const b = findBrowser(r.browserId)}
               <div class="srow">
                 {#if b}<Glyph id={b.id} family={b.family} name={b.name} size={20} />{:else}<span class="ph"></span>{/if}
-                <span class="nm url" title={r.url}>{r.url.replace(/^https?:\/\//, "")}<small>{fmtAgo(r.at)}{b ? ` · ${b.name}` : ""}</small></span>
-                <button class="icon" aria-label="Copy" onclick={() => { navigator.clipboard.writeText(r.url); flash("Copied"); }}>⧉</button>
+                <span class="nm url" title={r.url}>{r.url.replace(/^https?:\/\//, "")}<small>{timeAgo(r.at)}{b ? ` · ${b.name}` : ""}</small></span>
+                <button class="icon" aria-label="Copy" onclick={() => copyRecent(r.url)}>⧉</button>
                 <button class="btn" onclick={() => api.pick(r.url)}>Open…</button>
               </div>
             {:else}
@@ -278,40 +383,40 @@
               {#if snap.isDefault}<span class="status"><i></i>PickMyBrowser is default</span>
               {:else}<span class="status warn"><i></i>Not default</span><button class="btn pri" onclick={makeDefault}>Set as default</button>{/if}
             </div>
-            <div class="srow"><span class="nm">Launch at login</span>{@render toggle(snap.launchAtLogin, "Launch at login", toggleLogin)}</div>
-            <div class="srow"><span class="nm">Show {snap.os === "macos" ? "menu bar" : "tray"} icon</span>{@render toggle(snap.settings.showTray, "Show tray icon", () => setS("showTray", !snap!.settings.showTray))}</div>
+            <div class="srow"><span class="nm">Launch at login</span>{@render toggle(snap.launchAtLogin, "Launch at login", toggleLaunchAtLogin)}</div>
+            <div class="srow"><span class="nm">Show {snap.os === "macos" ? "menu bar" : "tray"} icon</span>{@render toggle(snap.settings.showTray, "Show tray icon", () => toggleSetting("showTray"))}</div>
           </div>
           <div class="sec">Picker</div>
           <div class="card">
             <div class="srow"><span class="nm">Position</span>
               <div class="seg" role="group" aria-label="Position">
-                <button aria-pressed={snap.settings.position === "cursor"} onclick={() => setS("position", "cursor")}>At cursor</button>
-                <button aria-pressed={snap.settings.position === "center"} onclick={() => setS("position", "center")}>Center</button>
+                <button aria-pressed={snap.settings.position === "cursor"} onclick={() => setSetting("position", "cursor")}>At cursor</button>
+                <button aria-pressed={snap.settings.position === "center"} onclick={() => setSetting("position", "center")}>Center</button>
               </div>
             </div>
             <div class="srow"><span class="nm">Theme</span>
               <div class="seg" role="group" aria-label="Theme">
-                {#each [["system", "System"], ["dark", "Dark"], ["light", "Light"]] as [v, l]}
-                  <button aria-pressed={snap.settings.theme === v} onclick={() => setS("theme", v as Settings["theme"])}>{l}</button>
+                {#each THEME_OPTIONS as [theme, label]}
+                  <button aria-pressed={snap.settings.theme === theme} onclick={() => setSetting("theme", theme)}>{label}</button>
                 {/each}
               </div>
             </div>
           </div>
           <div class="sec">Privacy & safety</div>
           <div class="card">
-            <div class="srow"><span class="nm">Strip tracking parameters<small>utm_*, fbclid, gclid, …</small></span>{@render toggle(snap.settings.stripTracking, "Strip tracking", () => setS("stripTracking", !snap!.settings.stripTracking))}</div>
-            <div class="srow"><span class="nm">Warn on lookalike domains<small>e.g. paypa1.com</small></span>{@render toggle(snap.settings.warnLookalike, "Warn on lookalikes", () => setS("warnLookalike", !snap!.settings.warnLookalike))}</div>
-            <div class="srow"><span class="nm">Remember recent links</span>{@render toggle(snap.settings.storeRecents, "Remember recent links", () => setS("storeRecents", !snap!.settings.storeRecents))}</div>
+            <div class="srow"><span class="nm">Strip tracking parameters<small>utm_*, fbclid, gclid, …</small></span>{@render toggle(snap.settings.stripTracking, "Strip tracking", () => toggleSetting("stripTracking"))}</div>
+            <div class="srow"><span class="nm">Warn on lookalike domains<small>e.g. paypa1.com</small></span>{@render toggle(snap.settings.warnLookalike, "Warn on lookalikes", () => toggleSetting("warnLookalike"))}</div>
+            <div class="srow"><span class="nm">Remember recent links</span>{@render toggle(snap.settings.storeRecents, "Remember recent links", () => toggleSetting("storeRecents"))}</div>
             <div class="srow" class:off={!snap.settings.storeRecents}><span class="nm">Keep last</span>
               <div class="seg" role="group" aria-label="Recent limit">
-                {#each [10, 20, 50] as n}<button aria-pressed={snap.settings.recentLimit === n} disabled={!snap.settings.storeRecents} onclick={() => setS("recentLimit", n)}>{n}</button>{/each}
+                {#each RECENT_LIMITS as n}<button aria-pressed={snap.settings.recentLimit === n} disabled={!snap.settings.storeRecents} onclick={() => setSetting("recentLimit", n)}>{n}</button>{/each}
               </div>
             </div>
           </div>
           <div class="sec">Danger zone</div>
           <div class="card">
             <div class="srow"><span class="nm">Reset everything<small>browsers, rules, recents and preferences</small></span>
-              {#if confirmReset}<button class="btn ghost" onclick={() => (confirmReset = false)}>Cancel</button><button class="btn pri" onclick={reset}>Reset</button>
+              {#if confirmReset}<button class="btn ghost" onclick={() => (confirmReset = false)}>Cancel</button><button class="btn pri" onclick={resetEverything}>Reset</button>
               {:else}<button class="btn danger" onclick={() => (confirmReset = true)}>Reset all…</button>{/if}
             </div>
             <div class="srow"><span class="nm">Remove PickMyBrowser<small>removes default-browser registration, login item and all data, then quits{snap.os === "macos" ? "; then drag the app to the Bin" : ""}</small></span>

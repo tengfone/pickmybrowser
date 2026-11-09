@@ -27,11 +27,12 @@ export const FIXTURE_BROWSERS = [
   chromium('brave', 'Brave', 'brave'),
 ];
 
-const configDir = () => process.env.PMB_CONFIG_DIR;
+// Read lazily: wdio.conf.mjs sets PMB_CONFIG_DIR after this module is imported.
+const launchLog = () => path.join(process.env.PMB_CONFIG_DIR, 'launches.jsonl');
 
 /** Launches recorded by the app since the last clearLaunches(). */
 export function launches() {
-  const f = path.join(configDir(), 'launches.jsonl');
+  const f = launchLog();
   if (!fs.existsSync(f)) return [];
   return fs
     .readFileSync(f, 'utf8')
@@ -39,7 +40,7 @@ export function launches() {
     .filter(Boolean)
     .map((l) => JSON.parse(l));
 }
-export const clearLaunches = () => fs.rmSync(path.join(configDir(), 'launches.jsonl'), { force: true });
+export const clearLaunches = () => fs.rmSync(launchLog(), { force: true });
 
 export async function waitForLaunch(count = 1) {
   await browser.waitUntil(() => launches().length >= count, { timeout: 5000, timeoutMsg: `expected ${count} launch(es)` });
@@ -60,6 +61,7 @@ export async function use(label) {
   await captureErrors();
 }
 
+/** Record uncaught errors in the current page (once per page load) for expectNoPageErrors. */
 async function captureErrors() {
   await browser.execute(() => {
     if (window.__e2e) return;
@@ -91,6 +93,14 @@ export async function freshStart({ onboarded = true } = {}) {
     await invoke('save_settings', { settings: { ...snap.settings, onboarded: true, ruleCountdownMs: 1200 } });
   }
   clearLaunches();
+  await reloadCurrentWindow();
+  await captureErrors();
+}
+
+/** Reload the focused window and wait until the new page has finished loading. */
+async function reloadCurrentWindow() {
+  // The reload is deferred so this script can return first; timeOrigin tells the old page
+  // apart from the new one.
   const origin = await browser.execute(() => {
     setTimeout(() => location.reload(), 0);
     return performance.timeOrigin;
@@ -110,7 +120,6 @@ export async function freshStart({ onboarded = true } = {}) {
     },
     { timeout: 30000, interval: 250, timeoutMsg: 'settings window did not reload' },
   );
-  await captureErrors();
 }
 
 /** Send a link to the app the way the OS would, then focus the picker window. */

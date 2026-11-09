@@ -3,7 +3,7 @@
 use crate::config::Rule;
 use url::Url;
 
-const TRACKING: &[&str] = &[
+const TRACKING_PARAMS: &[&str] = &[
     "fbclid", "gclid", "gclsrc", "dclid", "msclkid", "mc_cid", "mc_eid", "igshid", "yclid",
     "_hsenc", "_hsmi", "mkt_tok", "oly_anon_id", "oly_enc_id", "vero_id", "wickedid", "twclid",
     "ttclid", "si", "ref_src",
@@ -11,28 +11,27 @@ const TRACKING: &[&str] = &[
 
 /// Returns (cleaned_url, number_of_params_removed).
 pub fn strip_tracking(raw: &str) -> (String, usize) {
-    let Ok(mut u) = Url::parse(raw) else { return (raw.into(), 0) };
-    let pairs: Vec<(String, String)> = u.query_pairs().into_owned().collect();
+    let Ok(mut parsed) = Url::parse(raw) else { return (raw.into(), 0) };
+    let pairs: Vec<(String, String)> = parsed.query_pairs().into_owned().collect();
     if pairs.is_empty() {
         return (raw.into(), 0);
     }
-    let keep: Vec<_> = pairs
-        .iter()
-        .filter(|(k, _)| {
-            let k = k.to_lowercase();
-            !(k.starts_with("utm_") || TRACKING.contains(&k.as_str()))
-        })
-        .collect();
+    let keep: Vec<_> = pairs.iter().filter(|(key, _)| !is_tracking_param(key)).collect();
     let removed = pairs.len() - keep.len();
     if removed == 0 {
         return (raw.into(), 0);
     }
     if keep.is_empty() {
-        u.set_query(None);
+        parsed.set_query(None);
     } else {
-        u.query_pairs_mut().clear().extend_pairs(keep);
+        parsed.query_pairs_mut().clear().extend_pairs(keep);
     }
-    (u.into(), removed)
+    (parsed.into(), removed)
+}
+
+fn is_tracking_param(key: &str) -> bool {
+    let key = key.to_lowercase();
+    key.starts_with("utm_") || TRACKING_PARAMS.contains(&key.as_str())
 }
 
 /// Simple glob: `*` matches any run of chars. Pattern is matched against
@@ -51,24 +50,24 @@ pub fn glob(pat: &str, text: &str) -> bool {
 }
 
 pub fn rule_matches(pattern: &str, raw: &str) -> bool {
-    let Ok(u) = Url::parse(raw) else { return false };
-    let host = u.host_str().unwrap_or("").trim_start_matches("www.");
-    let target = format!("{host}{}", u.path());
-    let mut p = pattern.trim().trim_start_matches("https://").trim_start_matches("http://").to_string();
-    if p.is_empty() {
+    let Ok(parsed) = Url::parse(raw) else { return false };
+    let host = parsed.host_str().unwrap_or("").trim_start_matches("www.");
+    let target = format!("{host}{}", parsed.path());
+    let mut pattern = pattern.trim().trim_start_matches("https://").trim_start_matches("http://").to_string();
+    if pattern.is_empty() {
         return false;
     }
-    if !p.contains('/') {
-        p.push_str("/*");
+    if !pattern.contains('/') {
+        pattern.push_str("/*");
     }
-    if glob(&p, &target) {
+    if glob(&pattern, &target) {
         return true;
     }
     // `*.foo.com` should also match apex `foo.com`.
-    if let Some(rest) = p.strip_prefix("*.") {
-        return glob(rest, &target);
+    match pattern.strip_prefix("*.") {
+        Some(apex_pattern) => glob(apex_pattern, &target),
+        None => false,
     }
-    false
 }
 
 pub fn find_rule<'a>(rules: &'a [Rule], url: &str) -> Option<&'a Rule> {
@@ -109,21 +108,18 @@ pub fn lookalike(raw: &str) -> Option<String> {
         return None;
     }
     let apex = labels[labels.len() - 2];
-    for b in BRANDS {
-        if apex == *b {
-            return None; // genuine-looking apex
-        }
+    if BRANDS.contains(&apex) {
+        return None; // the real brand domain
     }
+    // Check every label except the TLD, splitting on hyphens so `paypal-secure` is caught.
     for label in &labels[..labels.len() - 1] {
-        for part in label.split('-') {
-            if part.is_empty() {
-                continue;
-            }
-            for b in BRANDS {
-                let normal = deconfuse(part) == deconfuse(b) && part != *b;
-                let embedded = part == *b && label.contains('-');
-                if normal || embedded {
-                    return Some(format!("{b}.com"));
+        let hyphenated = label.contains('-');
+        for part in label.split('-').filter(|p| !p.is_empty()) {
+            for brand in BRANDS {
+                let disguised = part != *brand && deconfuse(part) == deconfuse(brand);
+                let embedded = hyphenated && part == *brand;
+                if disguised || embedded {
+                    return Some(format!("{brand}.com"));
                 }
             }
         }

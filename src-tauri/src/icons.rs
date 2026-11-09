@@ -9,13 +9,15 @@ fn cache_dir() -> PathBuf {
     crate::config::dir().join("icons")
 }
 
-fn key(b: &Browser) -> String {
-    // Re-extract when the executable/bundle path changes (update, reinstall).
-    let mut h: u64 = 1469598103934665603;
-    for c in b.exec.bytes() {
-        h = (h ^ c as u64).wrapping_mul(1099511628211);
+/// Cache file name. It includes a hash of the executable/bundle path so the icon is
+/// re-extracted when that changes (update, reinstall).
+fn cache_file_name(b: &Browser) -> String {
+    // FNV-1a: stable across runs and Rust versions, unlike `DefaultHasher`.
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in b.exec.bytes() {
+        hash = (hash ^ byte as u64).wrapping_mul(0x0100_0000_01b3);
     }
-    format!("{}-{h:x}.txt", crate::browsers::slug(&b.id))
+    format!("{}-{hash:x}.txt", crate::browsers::slug(&b.id))
 }
 
 /// Map of browser id → `data:` URL. Missing entries mean "use the built-in glyph".
@@ -24,7 +26,7 @@ pub fn all(list: &[Browser]) -> HashMap<String, String> {
     let _ = std::fs::create_dir_all(&dir);
     let mut out = HashMap::new();
     for b in list {
-        let path = dir.join(key(b));
+        let path = dir.join(cache_file_name(b));
         let url = match std::fs::read_to_string(&path) {
             Ok(s) => s,
             Err(_) => {
@@ -48,7 +50,7 @@ fn png_url(bytes: &[u8]) -> String {
     format!("data:image/png;base64,{}", STANDARD.encode(bytes))
 }
 
-#[allow(dead_code)]
+#[cfg(windows)]
 fn encode_rgba(w: u32, h: u32, rgba: &[u8]) -> Option<Vec<u8>> {
     let mut buf = Vec::new();
     {

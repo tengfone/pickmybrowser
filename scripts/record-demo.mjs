@@ -8,7 +8,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { PNG } from 'pngjs';
-import { freshStart, invoke, use } from '../tests/e2e/helpers/app.mjs';
+import { freshStart, invoke, openLink, use } from '../tests/e2e/helpers/app.mjs';
 import { W, H, LINKS, linkPoint, renderBackdrop } from './demo-backdrop.mjs';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -140,14 +140,17 @@ function fadeOut(sec = 0.25) {
 }
 
 /* ---------- app helpers ---------- */
-function crop(img, r) {
-  const w = Math.min(r.w, img.width - r.x), h = Math.min(r.h, img.height - r.y);
+function crop(img, rect) {
+  const w = Math.min(rect.w, img.width - rect.x), h = Math.min(rect.h, img.height - rect.y);
   const o = new PNG({ width: w, height: h });
-  for (let y = 0; y < h; y++) img.data.copy(o.data, y * w * 4, ((y + r.y) * img.width + r.x) * 4, ((y + r.y) * img.width + r.x + w) * 4);
+  for (let y = 0; y < h; y++) {
+    const start = ((y + rect.y) * img.width + rect.x) * 4;
+    img.data.copy(o.data, y * w * 4, start, start + w * 4);
+  }
   return o;
 }
 /** Screenshot of the picker cropped to its card (the window can be taller than the card). */
-async function grab() {
+async function grabPickerCard() {
   const r = await browser.execute(() => {
     const c = document.querySelector('section.picker');
     if (!c) return null;
@@ -157,23 +160,134 @@ async function grab() {
   const img = decode(await browser.takeScreenshot());
   return r ? crop(img, r) : img;
 }
+
+/** Wait for the picker to repaint, then grab it. */
 async function shot() {
   await browser.pause(250);
-  return grab();
+  return grabPickerCard();
 }
-async function openAt(i) {
-  await use('settings');
-  await invoke('pick_url', { url: LINKS[i].url });
-  await use('picker');
-  await $('section.picker header.url').waitForDisplayed();
-}
+
+/** Place the picker just below-right of the link that opened it, kept on screen. */
 const pickerPos = (i) => {
   const p = linkPoint(i);
   return { x: p.x + 40, y: Math.min(p.y + 22, H - 330) };
 };
+
 async function showPicker(i, img) {
-  const p = pickerPos(i);
-  state.win = { img: img ?? (await shot()), ...p, alpha: 1 };
+  state.win = { img: img ?? (await shot()), ...pickerPos(i), alpha: 1 };
+}
+
+/* ---------- scene building blocks ---------- */
+/** Move the cursor onto link i, hover it briefly, click, and open that link in the app. */
+async function clickLink(i, moveSec) {
+  const p = linkPoint(i);
+  moveTo(p.x, p.y, moveSec);
+  state.hover = i;
+  emit(4);
+  click();
+  await openLink(LINKS[i].url);
+}
+
+/** Press keys in the picker, then show the result for `sec` seconds. */
+async function pressAndShow(i, keys, sec) {
+  await browser.keys(keys);
+  await showPicker(i);
+  hold(sec);
+}
+
+function closePicker() {
+  fadeOut();
+  state.hover = -1;
+  hold(0.4);
+}
+
+/* ---------- scenes ---------- */
+async function sceneNumberKey() {
+  state.caption = 'Click any link. <em>Pick a browser</em> with <kbd>1</kbd>-<kbd>9</kbd>';
+  hold(0.8);
+  await clickLink(0, 0.8);
+  await showPicker(0);
+  hold(1.0);
+  await pressAndShow(0, 'ArrowDown', 0.9); // highlight moves, as if the user pressed 2
+  await browser.keys('Enter');
+  closePicker();
+}
+
+async function scenePrivateWindow() {
+  state.caption = 'Hold <kbd>Shift</kbd> for a <em>private window</em>. Trackers are stripped.';
+  await clickLink(1);
+  await showPicker(1);
+  hold(1.2);
+  const SHIFT = '\uE008';
+  await browser.action('key').down(SHIFT).perform(true);
+  await showPicker(1);
+  hold(1.4);
+  await browser.action('key').up(SHIFT).perform();
+  await browser.keys('Escape');
+  closePicker();
+}
+
+async function sceneProfiles() {
+  state.caption = 'Press <kbd>→</kbd> to open a <em>specific profile</em>';
+  await clickLink(2);
+  await showPicker(2);
+  hold(1.0);
+  await pressAndShow(2, 'ArrowRight', 1.2);
+  await pressAndShow(2, 'ArrowDown', 0.9);
+  await browser.keys('Enter');
+  closePicker();
+}
+
+async function sceneRuleCountdown() {
+  state.caption = '<em>Rules</em> open known sites automatically. <kbd>Space</kbd> to cancel.';
+  await clickLink(3);
+  // Screenshots are slower than the frame rate, so grab as many as possible during the
+  // countdown, then use the nearest one for each output frame.
+  const SECONDS = 2.1;
+  const t0 = Date.now();
+  const shots = [];
+  while (Date.now() - t0 < SECONDS * 1000) {
+    try {
+      shots.push({ t: Date.now() - t0, img: await grabPickerCard() });
+    } catch {
+      break; // the picker closed when the rule fired
+    }
+  }
+  for (let k = 0; k < Math.round(SECONDS * FPS); k++) {
+    const t = (k * 1000) / FPS;
+    const nearest = shots.reduce((a, b) => (Math.abs(b.t - t) < Math.abs(a.t - t) ? b : a));
+    await showPicker(3, nearest.img);
+    emit();
+  }
+  closePicker();
+}
+
+async function sceneSettings() {
+  state.caption = 'Browsers, profiles, rules and recents in <em>Settings</em>';
+  await use('settings');
+  await $('nav.side').$('button*=Rules').click();
+  await browser.pause(250);
+  let img = decode(await browser.takeScreenshot());
+  img = scale(img, Math.min(1, 1000 / img.width, 600 / img.height));
+  moveTo(1100, 700, 0.4);
+  // Centred in the area above the caption pill.
+  state.win = { img, x: Math.round((W - img.width) / 2), y: Math.round((H - 70 - img.height) / 2), alpha: 1 };
+  hold(2.4);
+}
+
+/** Two-pass GIF encode: build a palette from the frames, then dither with it. */
+function encodeGif() {
+  fs.mkdirSync(path.dirname(out), { recursive: true });
+  const palette = path.join(dir, 'palette.png');
+  const input = ['-framerate', String(FPS), '-i', path.join(framesDir, 'f%05d.png')];
+  const resize = 'scale=960:-1:flags=lanczos';
+  execFileSync('ffmpeg', ['-y', '-v', 'error', ...input, '-vf', `${resize},palettegen=stats_mode=diff`, palette]);
+  execFileSync('ffmpeg', [
+    '-y', '-v', 'error', ...input, '-i', palette,
+    '-lavfi', `${resize}[x];[x][1:v]paletteuse=dither=sierra2_4a:diff_mode=rectangle`,
+    '-loop', '0', out,
+  ]);
+  console.log(`DEMO ${out} ${n} frames ${(fs.statSync(out).size / 1048576).toFixed(2)} MiB`);
 }
 
 describe('demo', () => {
@@ -187,96 +301,11 @@ describe('demo', () => {
       rules: [{ pattern: '*.figma.com', browserId: 'chrome', profileId: 'Profile 1', enabled: true }],
     });
 
-    // 1. click a link, pick with a number key
-    state.caption = 'Click any link. <em>Pick a browser</em> with <kbd>1</kbd>–<kbd>9</kbd>';
-    hold(0.8);
-    const p0 = linkPoint(0);
-    moveTo(p0.x, p0.y, 0.8);
-    state.hover = 0; emit(4); click();
-    await openAt(0);
-    await showPicker(0);
-    hold(1.0);
-    await browser.keys('ArrowDown'); // highlight moves, as if the user pressed 2
-    await showPicker(0);
-    hold(0.9);
-    await browser.keys('Enter');
-    fadeOut();
-    state.hover = -1; hold(0.4);
-
-    // 2. Shift = private window, trackers stripped
-    state.caption = 'Hold <kbd>Shift</kbd> for a <em>private window</em>. Trackers are stripped.';
-    const p1 = linkPoint(1);
-    moveTo(p1.x, p1.y);
-    state.hover = 1; emit(4); click();
-    await openAt(1);
-    await showPicker(1);
-    hold(1.2);
-    await browser.action('key').down('\uE008').perform(true);
-    await showPicker(1);
-    hold(1.4);
-    await browser.action('key').up('\uE008').perform();
-    await browser.keys('Escape');
-    fadeOut();
-    state.hover = -1; hold(0.4);
-
-    // 3. profiles
-    state.caption = 'Press <kbd>→</kbd> to open a <em>specific profile</em>';
-    const p2 = linkPoint(2);
-    moveTo(p2.x, p2.y);
-    state.hover = 2; emit(4); click();
-    await openAt(2);
-    await showPicker(2);
-    hold(1.0);
-    await browser.keys('ArrowRight');
-    await showPicker(2);
-    hold(1.2);
-    await browser.keys('ArrowDown');
-    await showPicker(2);
-    hold(0.9);
-    await browser.keys('Enter');
-    fadeOut();
-    state.hover = -1; hold(0.4);
-
-    // 4. rule countdown
-    state.caption = '<em>Rules</em> open known sites automatically. <kbd>Space</kbd> to cancel.';
-    const p3 = linkPoint(3);
-    moveTo(p3.x, p3.y);
-    state.hover = 3; emit(4); click();
-    await openAt(3);
-    const t0 = Date.now();
-    const shots = [];
-    while (Date.now() - t0 < 2100) {
-      try { shots.push({ t: Date.now() - t0, img: await grab() }); } catch { break; }
-    }
-    // resample the countdown to real time
-    for (let k = 0; k < Math.round(2.1 * FPS); k++) {
-      const t = (k * 1000) / FPS;
-      const s = shots.reduce((a, b) => (Math.abs(b.t - t) < Math.abs(a.t - t) ? b : a));
-      await showPicker(3, s.img);
-      emit();
-    }
-    fadeOut();
-    state.hover = -1; hold(0.4);
-
-    // 5. settings glimpse
-    state.caption = 'Browsers, profiles, rules and recents in <em>Settings</em>';
-    await use('settings');
-    await $('nav.side').$('button*=Rules').click();
-    await browser.pause(250);
-    let img = decode(await browser.takeScreenshot());
-    const s = Math.min(1, 1000 / img.width, 600 / img.height);
-    img = scale(img, s);
-    moveTo(1100, 700, 0.4);
-    state.win = { img, x: Math.round((W - img.width) / 2), y: Math.round((H - 70 - img.height) / 2), alpha: 1 };
-    hold(2.4);
-
-    // encode
-    fs.mkdirSync(path.dirname(out), { recursive: true });
-    const pal = path.join(dir, 'palette.png');
-    const input = ['-framerate', String(FPS), '-i', path.join(framesDir, 'f%05d.png')];
-    const vf = 'scale=960:-1:flags=lanczos';
-    execFileSync('ffmpeg', ['-y', '-v', 'error', ...input, '-vf', `${vf},palettegen=stats_mode=diff`, pal]);
-    execFileSync('ffmpeg', ['-y', '-v', 'error', ...input, '-i', pal, '-lavfi', `${vf}[x];[x][1:v]paletteuse=dither=sierra2_4a:diff_mode=rectangle`, '-loop', '0', out]);
-    console.log(`DEMO ${out} ${n} frames ${(fs.statSync(out).size / 1048576).toFixed(2)} MiB`);
+    await sceneNumberKey();
+    await scenePrivateWindow();
+    await sceneProfiles();
+    await sceneRuleCountdown();
+    await sceneSettings();
+    encodeGif();
   });
 });

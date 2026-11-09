@@ -14,9 +14,9 @@
 
   onMount(async () => {
     loadIcons();
-    const s = await api.snapshot();
-    applyOs(s.os);
-    applyTheme(s.settings.theme);
+    const { os, settings } = await api.snapshot();
+    applyOs(os);
+    applyTheme(settings.theme);
   });
 </script>
 

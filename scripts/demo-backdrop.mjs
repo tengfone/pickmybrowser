@@ -97,7 +97,8 @@ export function renderBackdrop(root, dir, name, opts) {
     `--window-size=${W},${H}`,
     '--virtual-time-budget=2000',
     '--allow-file-access-from-files',
-    `--user-data-dir=${path.join(dir, 'edge-profile')}`,
+    // One profile per render: a lingering headless process can keep a shared one locked.
+    `--user-data-dir=${path.join(dir, `profile-${name}`)}`,
     `--screenshot=${png}`,
     pathToFileURL(page).href,
   ], { stdio: 'ignore' });

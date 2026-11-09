@@ -54,9 +54,9 @@ function update(file, label, pick) {
   fs.writeFileSync(file, lines.join(eol));
 }
 
-const ispickmybrowser = (lines, t) => findKey(lines, t, 'name')?.m[2] === 'pickmybrowser';
-update(toml, 'Cargo.toml', (lines, t) => t.header === '[package]' && ispickmybrowser(lines, t));
-update(lock, 'Cargo.lock', (lines, t) => t.header === '[[package]]' && ispickmybrowser(lines, t));
+const isPickMyBrowser = (lines, t) => findKey(lines, t, 'name')?.m[2] === 'pickmybrowser';
+update(toml, 'Cargo.toml', (lines, t) => t.header === '[package]' && isPickMyBrowser(lines, t));
+update(lock, 'Cargo.lock', (lines, t) => t.header === '[[package]]' && isPickMyBrowser(lines, t));
 if (!dryRun && process.env.npm_lifecycle_event === 'version')
   execFileSync('git', ['add', toml, lock], { stdio: 'inherit' });
 

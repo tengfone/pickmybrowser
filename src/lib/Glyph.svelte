@@ -1,9 +1,18 @@
 <script lang="ts">
-  // Real OS icon when available; otherwise original circle glyphs / monogram.
+  // Shows the real OS icon when we have one; otherwise a drawn glyph for known families, or a monogram.
   import { icons } from "./icons.svelte";
-  let { family, name = "", size = 24, id = "" }: { family: string; name?: string; size?: number; id?: string } = $props();
+
+  interface Props {
+    family: string;
+    name?: string;
+    size?: number;
+    id?: string;
+  }
+  let { family, name = "", size = 24, id = "" }: Props = $props();
+
   const src = $derived(id ? icons[id] : undefined);
-  const hue = $derived([...family].reduce((a, c) => (a * 31 + c.charCodeAt(0)) % 360, 7));
+  /** Stable per-family hue for the monogram fallback. */
+  const hue = $derived([...family].reduce((acc, ch) => (acc * 31 + ch.charCodeAt(0)) % 360, 7));
   const letter = $derived((name || family).trim().charAt(0).toUpperCase() || "?");
 </script>
 

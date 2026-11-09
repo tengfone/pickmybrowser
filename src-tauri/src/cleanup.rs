@@ -35,35 +35,18 @@ fn remove_autostart() {
     #[cfg(windows)]
     {
         use winreg::{RegKey, enums::*};
-        let hk = RegKey::predef(HKEY_CURRENT_USER);
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
         for key in [
             r"Software\Microsoft\Windows\CurrentVersion\Run",
             r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run",
         ] {
-            if let Ok(k) = hk.open_subkey_with_flags(key, KEY_WRITE) {
-                for n in AUTOSTART_NAMES {
-                    let _ = k.delete_value(n);
+            if let Ok(k) = hkcu.open_subkey_with_flags(key, KEY_WRITE) {
+                for name in AUTOSTART_NAMES {
+                    let _ = k.delete_value(name);
                 }
             }
         }
-        // Explorer remembers every tray icon (Settings → Taskbar → Other system tray icons).
-        if let (Ok(exe), Ok(k)) = (std::env::current_exe(), hk.open_subkey(r"Control Panel\NotifyIconSettings")) {
-            let exe = exe.to_string_lossy().to_lowercase();
-            let ours: Vec<String> = k
-                .enum_keys()
-                .filter_map(|n| n.ok())
-                .filter(|n| {
-                    k.open_subkey(n)
-                        .and_then(|s| s.get_value::<String, _>("ExecutablePath"))
-                        .is_ok_and(|p| p.to_lowercase() == exe)
-                })
-                .collect();
-            if let Ok(w) = hk.open_subkey_with_flags(r"Control Panel\NotifyIconSettings", KEY_ALL_ACCESS) {
-                for n in ours {
-                    let _ = w.delete_subkey_all(n);
-                }
-            }
-        }
+        forget_tray_icon(&hkcu);
     }
     #[cfg(target_os = "macos")]
     if let Some(home) = dirs::home_dir() {
@@ -75,6 +58,31 @@ fn remove_autostart() {
     if let Some(cfg) = dirs::config_dir() {
         for n in AUTOSTART_NAMES {
             let _ = std::fs::remove_file(cfg.join("autostart").join(format!("{n}.desktop")));
+        }
+    }
+}
+
+/// Explorer remembers every tray icon (Settings → Taskbar → Other system tray icons);
+/// delete the entries that point at our executable.
+#[cfg(windows)]
+fn forget_tray_icon(hkcu: &winreg::RegKey) {
+    use winreg::enums::KEY_ALL_ACCESS;
+    const NOTIFY_ICONS: &str = r"Control Panel\NotifyIconSettings";
+    let (Ok(exe), Ok(icons)) = (std::env::current_exe(), hkcu.open_subkey(NOTIFY_ICONS)) else { return };
+    let exe = exe.to_string_lossy().to_lowercase();
+    let ours: Vec<String> = icons
+        .enum_keys()
+        .filter_map(|name| name.ok())
+        .filter(|name| {
+            icons
+                .open_subkey(name)
+                .and_then(|entry| entry.get_value::<String, _>("ExecutablePath"))
+                .is_ok_and(|path| path.to_lowercase() == exe)
+        })
+        .collect();
+    if let Ok(writable) = hkcu.open_subkey_with_flags(NOTIFY_ICONS, KEY_ALL_ACCESS) {
+        for name in ours {
+            let _ = writable.delete_subkey_all(name);
         }
     }
 }

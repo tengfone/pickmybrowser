@@ -100,9 +100,11 @@ pub fn make(name: &str, exec: String, exec_args: Vec<String>, hint: &str) -> Bro
     let family = k.map(|k| k.family.to_string()).unwrap_or_else(|| slug(name));
     let engine = k.map(|k| k.engine).unwrap_or(Engine::Other);
     let profiles = k.map(profiles_for).unwrap_or_default();
+    let trimmed = name.trim();
+    let name = if trimmed.is_empty() { k.map(|k| k.name).unwrap_or("Browser") } else { trimmed };
     Browser {
         id: family.clone(),
-        name: if name.trim().is_empty() { k.map(|k| k.name).unwrap_or("Browser").into() } else { name.trim().into() },
+        name: name.to_string(),
         family,
         engine,
         exec,
@@ -168,27 +170,36 @@ pub fn chromium_profiles(user_data: &Path) -> Vec<Profile> {
 pub fn parse_chromium_local_state(s: &str) -> Vec<Profile> {
     let Ok(v) = serde_json::from_str::<serde_json::Value>(s) else { return vec![] };
     let Some(cache) = v.pointer("/profile/info_cache").and_then(|c| c.as_object()) else { return vec![] };
-    let order: Vec<String> = v
+    let order: Vec<&str> = v
         .pointer("/profile/profiles_order")
         .and_then(|o| o.as_array())
-        .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+        .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
         .unwrap_or_default();
-    let mut out: Vec<Profile> = cache
+
+    let mut profiles: Vec<Profile> = cache
         .iter()
-        .map(|(dir, info)| {
-            let s = |k: &str| info.get(k).and_then(|n| n.as_str()).filter(|v| !v.is_empty());
-            let generic = s("name").is_none_or(|n| n.starts_with("Profile ") || n.starts_with("Person "));
-            let name = if generic { s("shortcut_name").or(s("gaia_name")).or(s("user_name")).or(s("name")) } else { s("name") };
-            Profile { id: dir.clone(), name: name.unwrap_or(dir).to_string() }
-        })
+        .map(|(dir, info)| Profile { id: dir.clone(), name: chromium_profile_name(info).unwrap_or(dir).to_string() })
         .collect();
-    out.sort_by_key(|p| {
-        order
-            .iter()
-            .position(|o| o == &p.id)
-            .unwrap_or(usize::MAX - if p.id == "Default" { 1 } else { 0 })
+
+    // Follow Chromium's own order; unlisted profiles go last, with "Default" first among them.
+    profiles.sort_by_key(|p| match order.iter().position(|o| *o == p.id) {
+        Some(index) => index,
+        None if p.id == "Default" => usize::MAX - 1,
+        None => usize::MAX,
     });
-    out
+    profiles
+}
+
+/// Chromium names unnamed profiles "Profile 1" / "Person 1"; prefer the account name then.
+fn chromium_profile_name(info: &serde_json::Value) -> Option<&str> {
+    let field = |key: &str| info.get(key).and_then(|n| n.as_str()).filter(|v| !v.is_empty());
+    let name = field("name");
+    let is_generic = name.is_none_or(|n| n.starts_with("Profile ") || n.starts_with("Person "));
+    if is_generic {
+        field("shortcut_name").or(field("gaia_name")).or(field("user_name")).or(name)
+    } else {
+        name
+    }
 }
 
 /// Parse Firefox `profiles.ini`.
@@ -203,10 +214,8 @@ pub fn parse_firefox_ini(s: &str) -> Vec<Profile> {
     for line in s.lines().map(str::trim) {
         if line.starts_with('[') {
             in_profile = line.to_lowercase().starts_with("[profile");
-        } else if in_profile {
-            if let Some(name) = line.strip_prefix("Name=") {
-                out.push(Profile { id: name.to_string(), name: name.to_string() });
-            }
+        } else if in_profile && let Some(name) = line.strip_prefix("Name=") {
+            out.push(Profile { id: name.to_string(), name: name.to_string() });
         }
     }
     out
@@ -250,23 +259,13 @@ pub fn launch_args(b: &Browser, url: &str, profile: Option<&str>, private: bool)
 pub fn launch(b: &Browser, url: &str, profile: Option<&str>, private: bool) -> Result<(), String> {
     let args = launch_args(b, url, profile, private);
     if crate::config::is_e2e() {
-        // Tests assert on this log instead of starting real browsers.
-        use std::io::Write;
-        let line = serde_json::json!({ "browser": b.id, "url": url, "profile": profile, "private": private, "args": args });
-        let mut f = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(crate::config::dir().join("launches.jsonl"))
-            .map_err(|e| e.to_string())?;
-        return writeln!(f, "{line}").map_err(|e| e.to_string());
+        return log_e2e_launch(b, url, profile, private, &args);
     }
     let mut cmd = if cfg!(target_os = "macos") {
         let mut c = Command::new("open");
-        // -n only when we must pass args (profiles/private) — otherwise reuse the running instance.
+        // -n only when we must pass args (profiles/private); otherwise reuse the running instance.
         if args.len() > 1 {
-            c.arg("-n");
-            c.arg("-a").arg(&b.exec).arg("--args");
-            c.args(&args);
+            c.arg("-n").arg("-a").arg(&b.exec).arg("--args").args(&args);
         } else {
             c.arg("-a").arg(&b.exec).arg(url);
         }
@@ -283,6 +282,18 @@ pub fn launch(b: &Browser, url: &str, profile: Option<&str>, private: bool) -> R
         cmd.creation_flags(DETACHED_PROCESS);
     }
     cmd.spawn().map(|_| ()).map_err(|e| format!("Failed to launch {}: {e}", b.name))
+}
+
+/// E2E tests assert on `launches.jsonl` instead of starting real browsers.
+fn log_e2e_launch(b: &Browser, url: &str, profile: Option<&str>, private: bool, args: &[String]) -> Result<(), String> {
+    use std::io::Write;
+    let line = serde_json::json!({ "browser": b.id, "url": url, "profile": profile, "private": private, "args": args });
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(crate::config::dir().join("launches.jsonl"))
+        .map_err(|e| e.to_string())?;
+    writeln!(file, "{line}").map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

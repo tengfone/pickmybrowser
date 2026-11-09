@@ -14,7 +14,7 @@ $instDir = "$env:LOCALAPPDATA\PickMyBrowser"
 # ---- backup
 $i = 0; foreach ($k in $keys) { reg export $k "$bak\k$i.reg" /y 2>$null | Out-Null; $i++ }
 $regApp = (Get-ItemProperty 'HKCU:\Software\RegisteredApplications' -EA 0).PickMyBrowser
-foreach ($d in $dirs) { if (Test-Path $d) { Copy-Item $d "$bak\$(Split-Path $d -Leaf)-$([array]::IndexOf($dirs,$d))" -Recurse } }
+for ($j = 0; $j -lt $dirs.Count; $j++) { if (Test-Path $dirs[$j]) { Copy-Item $dirs[$j] "$bak\$(Split-Path $dirs[$j] -Leaf)-$j" -Recurse } }
 Get-Process pickmybrowser -EA 0 | Stop-Process -Force; Start-Sleep 1
 
 # ---- install
@@ -22,7 +22,10 @@ Write-Output "Installing $Setup"
 Start-Process $Setup -ArgumentList '/S' -Wait
 $exe = "$instDir\pickmybrowser.exe"
 Write-Output ("installed exe: " + (Test-Path $exe))
-$uninstKey = Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' | Where-Object { (Get-ItemProperty $_.PSPath).DisplayName -eq 'PickMyBrowser' }
+function Get-UninstallEntry {
+  Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' | Where-Object { (Get-ItemProperty $_.PSPath).DisplayName -eq 'PickMyBrowser' }
+}
+$uninstKey = Get-UninstallEntry
 Write-Output ("Add/Remove entry: " + [bool]$uninstKey)
 
 # ---- seed state: run app (creates config + webview data), then register + autostart like the app does
@@ -53,7 +56,7 @@ $vals = @(
   @('HKCU:\Software\Microsoft\Windows\CurrentVersion\ApplicationAssociationToasts', 'PickMyBrowserURL_https'),
   @('HKCU:\Software\Classes\.html\OpenWithProgids', 'PickMyBrowserURL'))
 foreach ($v in $vals) { if ($null -ne (Get-ItemProperty $v[0] -Name $v[1] -EA 0)) { $left += "value $($v[0])\$($v[1])" } }
-if (Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' | Where-Object { (Get-ItemProperty $_.PSPath).DisplayName -eq 'PickMyBrowser' }) { $left += 'Add/Remove entry' }
+if (Get-UninstallEntry) { $left += 'Add/Remove entry' }
 if (Get-ChildItem "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" -Recurse -Filter 'PickMyBrowser*.lnk' -EA 0) { $left += 'Start menu shortcut' }
 if (Get-ChildItem ([Environment]::GetFolderPath('Desktop')) -Filter 'PickMyBrowser*.lnk' -EA 0) { $left += 'Desktop shortcut' }
 if (Get-Process pickmybrowser -EA 0 | Where-Object Path -like "$instDir*") { $left += 'process still running' }
