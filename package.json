@@ -41,6 +41,7 @@
     "@wdio/spec-reporter": "^9.33.1",
     "@wdio/tauri-plugin": "^1.5.1",
     "@wdio/tauri-service": "^1.5.1",
+    "pngjs": "^7.0.0",
     "svelte": "^5.56.3",
     "svelte-check": "^4.6.0",
     "typescript": "~6.0.3",
