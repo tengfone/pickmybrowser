@@ -1,5 +1,6 @@
 mod browsers;
 mod config;
+mod icons;
 mod platform;
 mod urls;
 
@@ -261,7 +262,14 @@ fn pick_url(app: AppHandle, url: String) {
 }
 
 #[tauri::command]
+async fn browser_icons(st: tauri::State<'_, AppState>) -> Result<std::collections::HashMap<String, String>, ()> {
+    let list = st.cfg.lock().unwrap().browsers.clone();
+    Ok(tauri::async_runtime::spawn_blocking(move || icons::all(&list)).await.unwrap_or_default())
+}
+
+#[tauri::command]
 fn rescan(st: tauri::State<AppState>) -> Vec<Browser> {
+    icons::clear_cache();
     let found = platform::detect();
     let mut c = st.cfg.lock().unwrap();
     c.merge_detected(found);
@@ -448,7 +456,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             snapshot, pending, present_picker, dismiss, open_url, pick_url, rescan, save_browsers,
             save_rules, save_settings, clear_recents, set_default, is_default, set_launch_at_login,
-            reset_all, open_settings, open_external
+            reset_all, open_settings, open_external, browser_icons
         ])
         .setup(move |app| {
             #[cfg(target_os = "macos")]

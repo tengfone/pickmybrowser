@@ -3,6 +3,7 @@
   import { listen } from "@tauri-apps/api/event";
   import { api, applyTheme, splitUrl, PROFILE_KEYS, modKey, type Browser, type Pending, type Snapshot } from "./api";
   import Glyph from "./Glyph.svelte";
+  import { loadIcons } from "./icons.svelte";
 
   let snap = $state<Snapshot | null>(null);
   let p = $state<Pending | null>(null);
@@ -36,6 +37,7 @@
     cancelAnimationFrame(raf);
     snap = await api.snapshot();
     applyTheme(snap.settings.theme);
+    loadIcons();
     p = next;
     sel = 0; expanded = null; profSel = -1; filter = ""; error = ""; copied = false; priv = false;
     mode = next.rule && ruleBrowser ? "rule" : "list";
@@ -231,7 +233,7 @@
     {#if mode === "rule" && ruleBrowser}
       <div class="rule">
         <div class="hd">
-          <Glyph family={ruleBrowser.family} name={ruleBrowser.name} size={28} />
+          <Glyph id={ruleBrowser.id} family={ruleBrowser.family} name={ruleBrowser.name} size={28} />
           <div>
             <div class="t">Opening in {ruleBrowser.name}{ruleProfile ? ` · ${ruleProfile.name}` : ""}</div>
             <div class="s">rule <code>{p.rule?.pattern}</code>{p.countdownMs && !p.lookalike ? ` · ${(p.countdownMs / 1000).toFixed(1)} s` : ""}</div>
@@ -263,7 +265,7 @@
             onmouseenter={() => { if (expanded !== b.id) { sel = i; } }}
             onclick={(e) => go(b, null, e.shiftKey)}
           >
-            <Glyph family={b.family} name={b.name} />
+            <Glyph id={b.id} family={b.family} name={b.name} />
             <span class="nm">
               {#each hl(b.name) as s}{#if s.m}<mark>{s.t}</mark>{:else}{s.t}{/if}{/each}
               {#if priv}<small> {privWord(b)}</small>{:else if b.profiles.length}<small> {b.profiles.length} profiles</small>{/if}

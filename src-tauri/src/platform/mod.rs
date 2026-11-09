@@ -16,6 +16,8 @@ use macos as imp;
 mod linux;
 #[cfg(all(unix, not(target_os = "macos")))]
 use linux as imp;
+#[cfg(all(unix, not(target_os = "macos")))]
+pub use linux::data_dirs as linux_data_dirs;
 
 pub fn detect() -> Vec<Browser> {
     let mut list = imp::detect();

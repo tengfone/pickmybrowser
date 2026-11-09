@@ -4,7 +4,7 @@ use std::process::Command;
 
 const DESKTOP_ID: &str = "pickmybrowser.desktop";
 
-fn data_dirs() -> Vec<PathBuf> {
+pub fn data_dirs() -> Vec<PathBuf> {
     let mut v = vec![];
     if let Some(d) = dirs::data_dir() {
         v.push(d);
@@ -88,7 +88,12 @@ pub fn detect() -> Vec<Browser> {
                 continue;
             }
             let bin = parts.remove(0);
-            out.push(browsers::make(&name, bin, parts, &id));
+            let mut b = browsers::make(&name, bin, parts, &id);
+            b.icon = s
+                .split("\n[")
+                .next()
+                .and_then(|g| g.lines().find_map(|l| l.trim().strip_prefix("Icon=").map(|v| v.trim().to_string())));
+            out.push(b);
         }
     }
     out

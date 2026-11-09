@@ -3,6 +3,7 @@
   import { listen } from "@tauri-apps/api/event";
   import { api, applyTheme, type Browser, type Rule, type Snapshot, type Settings } from "./api";
   import Glyph from "./Glyph.svelte";
+  import { loadIcons } from "./icons.svelte";
 
   let snap = $state<Snapshot | null>(null);
   let tab = $state<"browsers" | "rules" | "recents" | "general" | "about">("browsers");
@@ -38,6 +39,7 @@
     if (!snap) return;
     busy = true;
     snap.browsers = await api.rescan();
+    loadIcons(true);
     busy = false;
     flash(`Found ${snap.browsers.length} browser${snap.browsers.length === 1 ? "" : "s"}`);
   }
@@ -95,6 +97,7 @@
   async function reset() {
     if (!snap) return;
     await api.resetAll();
+    loadIcons(true);
     confirmReset = false;
     await load();
     step = 1;
@@ -128,7 +131,7 @@
           <div class="card">
             {#each snap.browsers as b (b.id)}
               <div class="srow" class:off={!b.enabled}>
-                <Glyph family={b.family} name={b.name} />
+                <Glyph id={b.id} family={b.family} name={b.name} />
                 <span class="nm">{b.name}{#if b.profiles.length}<small>{b.profiles.length} profiles</small>{/if}</span>
                 <span class="ok">{b.enabled ? "✓ found" : "hidden"}</span>
                 {@render toggle(b.enabled, `Show ${b.name}`, () => toggleBrowser(b))}
@@ -149,10 +152,6 @@
               <span class="nm">Default browser<small>http · https</small></span>
               {#if snap.isDefault}<span class="status"><i></i>PickMyBrowser is default</span>
               {:else}<button class="btn pri" onclick={makeDefault}>Set as default</button>{/if}
-            </div>
-            <div class="srow">
-              <span class="nm">Launch at login<small>keeps the picker instant</small></span>
-              {@render toggle(snap.launchAtLogin, "Launch at login", toggleLogin)}
             </div>
             <div class="srow">
               <span class="nm">Try it<small>open a sample link</small></span>
@@ -203,7 +202,7 @@
                 ondrop={(e) => { e.preventDefault(); if (dragFrom !== null) move(dragFrom, i); dragFrom = null; dragOver = null; }}
               >
                 <span class="grip" aria-hidden="true">⠿</span>
-                <Glyph family={b.family} name={b.name} />
+                <Glyph id={b.id} family={b.family} name={b.name} />
                 <span class="nm">{b.name}<small title={b.exec}>{b.exec}{b.profiles.length ? ` · ${b.profiles.length} profiles` : ""}</small></span>
                 <span class="mv">
                   <button class="icon" aria-label="Move up" disabled={i === 0} onclick={() => move(i, i - 1)}>↑</button>
@@ -259,7 +258,7 @@
             {#each snap.recents as r}
               {@const b = bName(r.browserId)}
               <div class="srow">
-                {#if b}<Glyph family={b.family} name={b.name} size={20} />{:else}<span class="ph"></span>{/if}
+                {#if b}<Glyph id={b.id} family={b.family} name={b.name} size={20} />{:else}<span class="ph"></span>{/if}
                 <span class="nm url" title={r.url}>{r.url.replace(/^https?:\/\//, "")}<small>{fmtAgo(r.at)}{b ? ` · ${b.name}` : ""}</small></span>
                 <button class="icon" aria-label="Copy" onclick={() => { navigator.clipboard.writeText(r.url); flash("Copied"); }}>⧉</button>
                 <button class="btn" onclick={() => api.pick(r.url)}>Open…</button>

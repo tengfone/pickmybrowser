@@ -1,10 +1,15 @@
 <script lang="ts">
-  // Original, circle-based glyphs (not brand logos). Unknown families get a monogram.
-  let { family, name = "", size = 24 }: { family: string; name?: string; size?: number } = $props();
+  // Real OS icon when available; otherwise original circle glyphs / monogram.
+  import { icons } from "./icons.svelte";
+  let { family, name = "", size = 24, id = "" }: { family: string; name?: string; size?: number; id?: string } = $props();
+  const src = $derived(id ? icons[id] : undefined);
   const hue = $derived([...family].reduce((a, c) => (a * 31 + c.charCodeAt(0)) % 360, 7));
   const letter = $derived((name || family).trim().charAt(0).toUpperCase() || "?");
 </script>
 
+{#if src}
+<img class="ico" {src} width={size} height={size} alt="" draggable="false" />
+{:else}
 <svg class="ico" width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
   {#if family === "chrome"}
     <circle cx="12" cy="12" r="11" fill="#2E9E5B" /><path d="M12 1a11 11 0 0 1 9.5 5.5H12z" fill="#E0463A" /><path d="M21.5 6.5A11 11 0 0 1 12 23l4.8-8.3z" fill="#F2B632" /><circle cx="12" cy="12" r="5" fill="#fff" /><circle cx="12" cy="12" r="3.6" fill="#3B7BE8" />
@@ -37,7 +42,8 @@
     <text x="12" y="16.2" text-anchor="middle" font-size="12" font-weight="700" fill="#fff" font-family="IBM Plex Sans, system-ui">{letter}</text>
   {/if}
 </svg>
+{/if}
 
 <style>
-  .ico { flex: none; display: block; }
+  .ico { flex: none; display: block; object-fit: contain; }
 </style>
