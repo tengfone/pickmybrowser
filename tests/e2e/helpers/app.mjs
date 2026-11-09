@@ -98,15 +98,17 @@ export async function freshStart({ onboarded = true } = {}) {
   await browser.waitUntil(
     async () => {
       try {
-        return await browser.execute(
-          (o) => performance.timeOrigin !== o && document.readyState === 'complete',
-          origin,
-        );
+        // A script sent while the page is mid-reload can be lost and never answer (seen on slow
+        // CI runners), so each poll gets its own short timeout and is simply retried.
+        return await Promise.race([
+          browser.execute((o) => performance.timeOrigin !== o && document.readyState === 'complete', origin),
+          new Promise((r) => setTimeout(() => r(false), 3000)),
+        ]);
       } catch {
         return false;
       }
     },
-    { timeout: 15000, timeoutMsg: 'settings window did not reload' },
+    { timeout: 30000, interval: 250, timeoutMsg: 'settings window did not reload' },
   );
   await captureErrors();
 }
