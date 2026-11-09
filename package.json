@@ -1,7 +1,7 @@
 {
-  "name": "pickmybrowser-tauri",
+  "name": "pickmybrowser",
   "version": "0.1.0",
-  "description": "",
+  "description": "Lightweight, beautiful, cross-platform browser picker (Tauri)",
   "type": "module",
   "scripts": {
     "dev": "vite dev",
@@ -10,7 +10,17 @@
     "prepare": "svelte-kit sync || echo ''",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "build:wdio": "vite build --mode wdio",
+    "build:e2e": "node scripts/build-e2e.cjs",
+    "test:e2e": "npm run build:e2e && npm run test:e2e:run",
+    "test:e2e:run": "wdio run wdio.conf.mjs",
+    "test:smoke": "node scripts/smoke-release.cjs",
+    "demo": "wdio run scripts/demo.wdio.conf.mjs",
+    "version": "node scripts/sync-version.cjs",
+    "release:patch": "npm version patch -m \"chore(release): v%s\" && git push --follow-tags",
+    "release:minor": "npm version minor -m \"chore(release): v%s\" && git push --follow-tags",
+    "release:major": "npm version major -m \"chore(release): v%s\" && git push --follow-tags"
   },
   "license": "MIT",
   "dependencies": {
@@ -24,9 +34,20 @@
     "@sveltejs/kit": "^2.65.1",
     "@sveltejs/vite-plugin-svelte": "^7.1.2",
     "@tauri-apps/cli": "^2",
+    "@wdio/cli": "^9.33.1",
+    "@wdio/globals": "^9.33.1",
+    "@wdio/local-runner": "^9.33.1",
+    "@wdio/mocha-framework": "^9.33.1",
+    "@wdio/spec-reporter": "^9.33.1",
+    "@wdio/tauri-plugin": "^1.5.1",
+    "@wdio/tauri-service": "^1.5.1",
     "svelte": "^5.56.3",
     "svelte-check": "^4.6.0",
     "typescript": "~6.0.3",
     "vite": "^8.0.16"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tengfone/pickmybrowser.git"
   }
 }

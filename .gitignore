@@ -3,3 +3,5 @@ build
 .svelte-kit
 src-tauri/target
 src-tauri/gen
+test-results
+.demo-frames

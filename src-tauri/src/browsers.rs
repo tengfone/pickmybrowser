@@ -249,6 +249,17 @@ pub fn launch_args(b: &Browser, url: &str, profile: Option<&str>, private: bool)
 
 pub fn launch(b: &Browser, url: &str, profile: Option<&str>, private: bool) -> Result<(), String> {
     let args = launch_args(b, url, profile, private);
+    if crate::config::is_e2e() {
+        // Tests assert on this log instead of starting real browsers.
+        use std::io::Write;
+        let line = serde_json::json!({ "browser": b.id, "url": url, "profile": profile, "private": private, "args": args });
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(crate::config::dir().join("launches.jsonl"))
+            .map_err(|e| e.to_string())?;
+        return writeln!(f, "{line}").map_err(|e| e.to_string());
+    }
     let mut cmd = if cfg!(target_os = "macos") {
         let mut c = Command::new("open");
         // -n only when we must pass args (profiles/private) — otherwise reuse the running instance.

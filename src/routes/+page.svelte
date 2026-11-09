@@ -9,6 +9,9 @@
 
   const label = getCurrentWebviewWindow().label;
 
+  // E2E builds only (`npm run build:wdio`): WebdriverIO's execute/mock bridge.
+  if (import.meta.env.VITE_WDIO === "1") void import("@wdio/tauri-plugin");
+
   onMount(async () => {
     loadIcons();
     const s = await api.snapshot();

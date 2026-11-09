@@ -84,7 +84,7 @@ fn picker(app: &AppHandle) -> WebviewWindow {
     let w = b.build().expect("picker window");
     let h = w.clone();
     w.on_window_event(move |e| match e {
-        WindowEvent::Focused(false) => {
+        WindowEvent::Focused(false) if !config::is_e2e() => {
             let _ = h.hide();
         }
         WindowEvent::CloseRequested { api, .. } => {
@@ -335,6 +335,9 @@ fn is_default() -> bool {
 
 #[tauri::command]
 fn set_launch_at_login(app: AppHandle, on: bool) -> Result<(), String> {
+    if config::is_e2e() {
+        return Err("disabled in E2E".into());
+    }
     let a = app.autolaunch();
     if on { a.enable() } else { a.disable() }.map_err(|e| e.to_string())
 }
@@ -358,6 +361,9 @@ fn open_settings(app: AppHandle) {
 /// The app files themselves are removed by the OS uninstaller / Bin.
 #[tauri::command]
 fn uninstall_app(app: AppHandle) -> Result<(), String> {
+    if config::is_e2e() {
+        return Err("disabled in E2E".into());
+    }
     cleanup::spawn_detached_uninstall()?;
     app.exit(0);
     Ok(())
@@ -461,10 +467,20 @@ pub fn run() {
         cfg.save();
     }
 
-    let app = tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+    let e2e = config::is_e2e();
+    let mut builder = tauri::Builder::default();
+    // E2E: several test runs may overlap a real install, so no single-instance lock.
+    if !e2e {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             handle_args(app, &argv, false);
-        }))
+        }));
+    }
+    // E2E-only: WebdriverIO bridge + embedded W3C WebDriver server (never in release builds).
+    #[cfg(feature = "wdio")]
+    {
+        builder = builder.plugin(tauri_plugin_wdio::init()).plugin(tauri_plugin_wdio_webdriver::init());
+    }
+    let app = builder
         .plugin(
             tauri_plugin_autostart::Builder::new()
                 .app_name("PickMyBrowser")
@@ -481,7 +497,9 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             let h = app.handle().clone();
-            setup_tray(&h)?;
+            if !e2e {
+                setup_tray(&h)?;
+            }
             picker(&h); // pre-create so it appears instantly
             #[cfg(not(target_os = "macos"))]
             handle_args(&h, &args, true);

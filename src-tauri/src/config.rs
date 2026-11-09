@@ -70,7 +70,18 @@ fn yes() -> bool {
     true
 }
 
+/// E2E mode only exists in `--features wdio` builds; release builds ignore `PMB_E2E`.
+pub fn is_e2e() -> bool {
+    cfg!(feature = "wdio") && std::env::var_os("PMB_E2E").is_some_and(|v| !v.is_empty())
+}
+
 pub fn dir() -> PathBuf {
+    // E2E builds keep their state in a throwaway folder chosen by the test runner.
+    if is_e2e() {
+        if let Some(d) = std::env::var_os("PMB_CONFIG_DIR") {
+            return PathBuf::from(d);
+        }
+    }
     // Separate from the legacy WPF app (%AppData%\PickMyBrowser) so the two never clash.
     dirs::config_dir()
         .unwrap_or_else(std::env::temp_dir)

@@ -22,6 +22,8 @@ dirs = "6"
 url = "2"
 base64 = "0.22"
 png = "0.18"
+tauri-plugin-wdio = { version = "1", optional = true }
+tauri-plugin-wdio-webdriver = { version = "1", optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi"] }
@@ -38,3 +40,7 @@ lto = true
 opt-level = "s"
 panic = "abort"
 strip = true
+
+[features]
+# E2E-only: WebdriverIO bridge + embedded WebDriver server. Never enabled for release builds.
+wdio = ["dep:tauri-plugin-wdio", "dep:tauri-plugin-wdio-webdriver"]

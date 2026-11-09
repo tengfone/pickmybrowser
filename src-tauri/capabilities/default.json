@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Picker and settings windows",
+  "windows": ["picker", "settings"],
+  "permissions": ["core:default"]
+}
