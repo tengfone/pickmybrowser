@@ -63,18 +63,17 @@ describe('Picker', () => {
         const p = await w.outerPosition();
         return [p.x, p.y];
       });
-    // Move the window away from the cursor, as if the mouse had wandered since it appeared.
+    // Nudge the window a little from where it appeared, as if the mouse had moved on since.
     await browser.execute(async () => {
       const { WebviewWindow } = window.__TAURI__.webviewWindow;
       const { PhysicalPosition } = window.__TAURI__.dpi;
       const w = await WebviewWindow.getByLabel('picker');
-      await w.setPosition(new PhysicalPosition(300, 200));
-      await w.setFocus();
-      document.querySelector('section.picker').focus();
+      const p = await w.outerPosition();
+      await w.setPosition(new PhysicalPosition(p.x + 40, p.y + 30));
     });
     await browser.pause(200);
     const before = await position();
-    await browser.keys('ArrowRight');
+    await $('ul.list li.row button.caret').click();
     await expect($$('ul.list li.row.sub')).toBeElementsArrayOfSize(2);
     await browser.pause(300);
     expect(await position()).toEqual(before);
