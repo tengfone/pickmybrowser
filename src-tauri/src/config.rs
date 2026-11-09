@@ -137,6 +137,7 @@ impl Config {
             if let Some(found) = detected.iter().find(|b| b.id == saved.id) {
                 let mut browser = found.clone();
                 browser.enabled = saved.enabled;
+                browser.hotkey = saved.hotkey.clone();
                 merged.push(browser);
             }
         }

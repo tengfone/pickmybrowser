@@ -114,4 +114,26 @@ describe('Picker', () => {
     const r = (await invoke('snapshot')).recents[0];
     expect(r).toMatchObject({ url: 'https://example.com/recent', browserId: 'edge' });
   });
+
+  it('a custom key opens its browser; the others keep their numbers', async () => {
+    await use('settings');
+    const browsers = (await invoke('snapshot')).browsers;
+    browsers.find((b) => b.id === 'firefox').hotkey = 'f';
+    await invoke('save_browsers', { browsers });
+    // Chrome 1, Firefox F, Edge 2, Brave 3.
+    await openLink('https://example.com/key');
+    await expect($$('ul.list li.row .kbd')).toHaveText(['1', 'F', '2', '3']);
+    await browser.keys('f');
+    const [first] = await waitForLaunch();
+    expect(first.browser).toBe('firefox');
+    clearLaunches();
+    await openLink('https://example.com/key2');
+    await browser.keys('2');
+    const [second] = await waitForLaunch();
+    expect(second.browser).toBe('edge');
+    // Clean up for the other specs.
+    await use('settings');
+    browsers.find((b) => b.id === 'firefox').hotkey = null;
+    await invoke('save_browsers', { browsers });
+  });
 });

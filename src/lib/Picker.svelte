@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
   import { listen } from "@tauri-apps/api/event";
-  import { api, applyTheme, splitUrl, PROFILE_KEYS, modKey, type Browser, type Pending, type Snapshot } from "./api";
+  import { api, applyTheme, splitUrl, PROFILE_KEYS, pickerKeys, modKey, type Browser, type Pending, type Snapshot } from "./api";
   import Glyph from "./Glyph.svelte";
   import { loadIcons } from "./icons.svelte";
 
@@ -23,6 +23,9 @@
   let countdownFrame = 0;
 
   const enabledBrowsers = $derived((snapshot?.browsers ?? []).filter((b) => b.enabled));
+  /** browser id → picker key (custom key, else position number). */
+  const keys = $derived(pickerKeys(snapshot?.browsers ?? []));
+  const hasCustomKeys = $derived(enabledBrowsers.some((b) => b.hotkey));
   const filterEnabled = $derived(enabledBrowsers.length > HOTKEY_COUNT);
   const visibleBrowsers = $derived(
     filter ? enabledBrowsers.filter((b) => b.name.toLowerCase().includes(filter.toLowerCase())) : enabledBrowsers,
@@ -232,21 +235,36 @@
     if (onListNavKey(e, current, expanded)) return;
     if (mod || e.altKey) return;
 
-    const digit = /^Digit([1-9])$/.exec(e.code);
-    if (digit) {
-      e.preventDefault();
-      const b = visibleBrowsers[Number(digit[1]) - 1];
-      if (b) open(b, null, e.shiftKey);
-      return;
-    }
-
     const key = e.key.toLowerCase();
+    // Profile letters win while a profile list is open.
     if (expanded && PROFILE_KEYS.includes(key)) {
       const profile = expanded.profiles[PROFILE_KEYS.indexOf(key)];
       if (profile) {
         e.preventDefault();
         open(expanded, profile.id, e.shiftKey);
       }
+      return;
+    }
+
+    // Browser keys: the user's own letter/digit, or the position number. Match the physical
+    // key for digits so Shift+1 (private) still works on every keyboard layout.
+    const digit = /^Digit([0-9])$/.exec(e.code)?.[1];
+    // While filtering, digits pick from the filtered list (1 = first match), as before.
+    if (filter && digit && digit !== "0") {
+      const b = visibleBrowsers[Number(digit) - 1];
+      if (b) {
+        e.preventDefault();
+        open(b, null, e.shiftKey);
+      }
+      return;
+    }
+    const pressed = digit ?? (/^Key([A-Z])$/.exec(e.code)?.[1].toLowerCase() || key);
+    // With more than nine browsers, letters type into the filter instead.
+    const letterBlocked = filterEnabled && !digit;
+    const hit = letterBlocked ? undefined : visibleBrowsers.find((b) => keys.get(b.id) === pressed);
+    if (hit && !filter) {
+      e.preventDefault();
+      open(hit, null, e.shiftKey);
       return;
     }
 
@@ -373,7 +391,7 @@
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m9 6 6 6-6 6" /></svg>
               </button>
             {/if}
-            <span class="kbd">{i < HOTKEY_COUNT ? i + 1 : "·"}</span>
+            <span class="kbd">{keys.get(b.id)?.toUpperCase() ?? "·"}</span>
           </li>
           {#if isExpanded}
             {#each b.profiles as profile, j (profile.id)}
@@ -404,7 +422,8 @@
       {#if mode === "rule"}
         <span><span class="kbd">Esc</span> show all browsers</span>
       {:else}
-        <span><span class="kbd">1</span>–<span class="kbd">9</span> open</span>
+        {#if hasCustomKeys}<span>press a browser's key to open</span>
+        {:else}<span><span class="kbd">1</span>–<span class="kbd">9</span> open</span>{/if}
         <span><span class="kbd">{os === "macos" ? "⇧" : "Shift"}</span> {privateHeld ? "held" : "private"}</span>
         {#if expandedId}<span><span class="kbd">Q</span><span class="kbd">W</span><span class="kbd">E</span> profile</span>
         {:else if anyProfiles}<span><span class="kbd">→</span> profiles</span>{/if}

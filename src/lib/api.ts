@@ -15,6 +15,8 @@ export interface Browser {
   execArgs: string[];
   profiles: Profile[];
   enabled: boolean;
+  /** The user's own picker key; unset means a position number. */
+  hotkey?: string | null;
 }
 
 export interface Rule {
@@ -105,6 +107,23 @@ export const api = {
 
 /** Keys that pick a profile once a browser's profile list is expanded. */
 export const PROFILE_KEYS = "qwertyuiop".split("");
+
+/**
+ * The picker key of every enabled browser, in list order. A browser's own key (e.g. "c" for
+ * Chrome) wins; the others get the digits 1–9 in order, skipping digits someone chose.
+ * Browsers left over (more than nine) get no key.
+ */
+export function pickerKeys(browsers: Browser[]): Map<string, string> {
+  const enabled = browsers.filter((b) => b.enabled);
+  const custom = new Set(enabled.map((b) => b.hotkey).filter((k): k is string => !!k));
+  const digits = "123456789".split("").filter((d) => !custom.has(d));
+  const keys = new Map<string, string>();
+  for (const b of enabled) {
+    const key = b.hotkey || digits.shift();
+    if (key) keys.set(b.id, key);
+  }
+  return keys;
+}
 
 /** Split a URL for display: host (bold), middle (truncatable), tail (always visible). */
 export function splitUrl(raw: string) {

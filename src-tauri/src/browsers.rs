@@ -38,6 +38,9 @@ pub struct Browser {
     pub profiles: Vec<Profile>,
     #[serde(default = "yes")]
     pub enabled: bool,
+    /// The user's own picker key (one lowercase letter or digit); None = position number.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hotkey: Option<String>,
     /// Linux: `Icon=` from the .desktop entry (theme name or absolute path).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
@@ -111,6 +114,7 @@ pub fn make(name: &str, exec: String, exec_args: Vec<String>, hint: &str) -> Bro
         exec_args,
         profiles,
         enabled: true,
+        hotkey: None,
         icon: None,
     }
 }

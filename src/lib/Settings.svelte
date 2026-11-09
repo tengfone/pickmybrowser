@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { listen } from "@tauri-apps/api/event";
-  import { api, applyTheme, type Browser, type Rule, type Snapshot, type Settings, type UpdateInfo } from "./api";
+  import { api, applyTheme, pickerKeys, type Browser, type Rule, type Snapshot, type Settings, type UpdateInfo } from "./api";
   import Glyph from "./Glyph.svelte";
   import { loadIcons } from "./icons.svelte";
 
@@ -86,11 +86,34 @@
     saveBrowsers();
   }
 
-  /** The picker hotkey shown for a browser: its position among enabled browsers, if within 1–9. */
+  /** The picker key shown for a browser: its own key, else its position number (1–9). */
+  const keyLabels = $derived(pickerKeys(snap?.browsers ?? []));
   function hotkeyLabel(b: Browser) {
-    if (!snap || !b.enabled) return "–";
-    const index = snap.browsers.filter((x) => x.enabled).indexOf(b);
-    return index < 9 ? String(index + 1) : "–";
+    return keyLabels.get(b.id)?.toUpperCase() ?? "–";
+  }
+
+  // Custom keys: click a browser's key, then press the key you want.
+  let recordingKey = $state<string | null>(null);
+
+  function onKeyRecord(e: KeyboardEvent) {
+    if (!snap || !recordingKey) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const browser = snap.browsers.find((b) => b.id === recordingKey);
+    recordingKey = null;
+    if (!browser || e.key === "Escape") return;
+    if (e.key === "Backspace" || e.key === "Delete") {
+      browser.hotkey = null; // back to its position number
+      saveBrowsers();
+      return;
+    }
+    const key = (/^Digit([0-9])$/.exec(e.code)?.[1] ?? /^Key([A-Z])$/.exec(e.code)?.[1] ?? "").toLowerCase();
+    if (!key) return flash("Use a letter or a number");
+    const owner = snap.browsers.find((b) => b !== browser && b.hotkey === key);
+    if (owner) owner.hotkey = null; // a key belongs to one browser; the newest choice wins
+    browser.hotkey = key;
+    saveBrowsers();
+    flash(owner ? `${key.toUpperCase()} moved from ${owner.name}` : `${browser.name}: ${key.toUpperCase()}`);
   }
 
   function endDrag() {
@@ -275,6 +298,8 @@
   }
 </script>
 
+<svelte:window onkeydowncapture={(e) => recordingKey && onKeyRecord(e)} />
+
 {#snippet toggle(on: boolean, label: string, fn: () => void)}
   <button class="tog" role="switch" aria-checked={on} aria-label={label} onclick={fn}></button>
 {/snippet}
@@ -369,13 +394,22 @@
                   <button class="icon" aria-label="Move up" disabled={i === 0} onclick={() => move(i, i - 1)}>↑</button>
                   <button class="icon" aria-label="Move down" disabled={i === snap.browsers.length - 1} onclick={() => move(i, i + 1)}>↓</button>
                 </span>
-                <span class="kbd">{hotkeyLabel(b)}</span>
+                <button
+                  class="keychip"
+                  class:custom={!!b.hotkey}
+                  class:rec={recordingKey === b.id}
+                  disabled={!b.enabled}
+                  title={b.hotkey ? "Your key. Click to change; Backspace resets to the number." : "Click, then press a letter or number"}
+                  aria-label={`Picker key for ${b.name}`}
+                  onclick={() => (recordingKey = recordingKey === b.id ? null : b.id)}
+                >{recordingKey === b.id ? "Press a key…" : hotkeyLabel(b)}</button>
                 {@render toggle(b.enabled, `Show ${b.name} in picker`, () => toggleBrowser(b))}
               </div>
             {:else}
               <div class="srow"><span class="nm muted">No browsers found. Click Rescan.</span></div>
             {/each}
           </div>
+          <p class="hint">Click a key to give a browser its own, like <span class="kbd">C</span> for Chrome; Backspace while choosing resets it to its number.</p>
           <p class="hint">Profiles are detected automatically for Chromium and Firefox browsers. Press <span class="kbd">→</span> in the picker to choose one.</p>
 
         {:else if tab === "rules"}
@@ -536,6 +570,17 @@
   .srow:first-child { border-top: 0; }
   .srow.off :global(.ico), .srow.off .nm { opacity: 0.55; }
   .srow.over { box-shadow: inset 0 2px 0 var(--sig); }
+  /* The browser's picker key; clickable to choose your own. */
+  .keychip {
+    min-width: 22px; height: 22px; padding: 0 6px; flex: none; cursor: pointer;
+    font: 500 11px/1 var(--mono); color: var(--tx2); background: var(--surf2);
+    border: 1px solid var(--line2); border-bottom-width: 2px; border-radius: 4px;
+  }
+  .keychip:hover:not(:disabled) { border-color: var(--ring); color: var(--tx); }
+  .keychip.custom { color: var(--tx); border-color: var(--ring); font-weight: 700; }
+  .keychip.rec { color: var(--tx); border: 2px solid var(--ring); animation: pulse 1s ease-in-out infinite; }
+  .keychip:disabled { opacity: 0.4; cursor: default; }
+  @keyframes pulse { 50% { opacity: 0.6; } }
   .srow[data-browser-index] { cursor: grab; user-select: none; touch-action: none; }
   .srow.dragging { cursor: grabbing; opacity: 0.6; }
   .grip { color: var(--tx3); font-size: 14px; }

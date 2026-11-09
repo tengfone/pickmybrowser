@@ -117,7 +117,17 @@ pub fn rescan(st: State<AppState>) -> Vec<Browser> {
 }
 
 #[tauri::command]
-pub fn save_browsers(app: AppHandle, st: State<AppState>, browsers: Vec<Browser>) {
+pub fn save_browsers(app: AppHandle, st: State<AppState>, mut browsers: Vec<Browser>) {
+    // Custom keys: one lowercase letter or digit each, and no two browsers sharing one.
+    let mut taken = std::collections::HashSet::new();
+    for browser in &mut browsers {
+        browser.hotkey = browser
+            .hotkey
+            .take()
+            .map(|k| k.to_ascii_lowercase())
+            .filter(|k| k.len() == 1 && k.chars().all(|c| c.is_ascii_alphanumeric()))
+            .filter(|k| taken.insert(k.clone()));
+    }
     {
         let mut cfg = st.cfg.lock().unwrap();
         cfg.browsers = browsers;
