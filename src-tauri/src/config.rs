@@ -39,6 +39,10 @@ pub struct Settings {
     pub rule_countdown_ms: u64,
     pub show_tray: bool,
     pub onboarded: bool,
+    /// Check for updates once a day and offer to install them.
+    pub auto_update: bool,
+    /// Unix seconds of the last successful update check.
+    pub last_update_check: u64,
 }
 
 impl Default for Settings {
@@ -53,6 +57,8 @@ impl Default for Settings {
             rule_countdown_ms: 1200,
             show_tray: true,
             onboarded: false,
+            auto_update: true,
+            last_update_check: 0,
         }
     }
 }

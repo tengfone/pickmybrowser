@@ -56,3 +56,7 @@ npm run demo               # re-record assets/demo.gif (needs ffmpeg + Edge/Chro
 The E2E build (`--features wdio`, `PMB_E2E=1`) uses a throwaway config folder and a fixed browser list, and records launches instead of opening browsers, so it never touches your real setup.
 
 Releasing: `npm run release:patch|minor|major` bumps the version, tags and pushes; CI tests on all three OSes, builds every platform and creates a draft release.
+
+## License
+
+[MIT](LICENSE)

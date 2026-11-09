@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { listen } from "@tauri-apps/api/event";
-  import { api, applyTheme, type Browser, type Rule, type Snapshot, type Settings } from "./api";
+  import { api, applyTheme, type Browser, type Rule, type Snapshot, type Settings, type UpdateInfo } from "./api";
   import Glyph from "./Glyph.svelte";
   import { loadIcons } from "./icons.svelte";
 
@@ -39,12 +39,17 @@
 
   onMount(() => {
     load();
+    api.updateStatus().then((u) => (update = u));
+    const unlistenUpdate = listen<UpdateInfo | null>("update:changed", (e) => (update = e.payload));
+    const unlistenTab = listen<Tab>("settings:tab", (e) => (tab = e.payload));
     const unlisten = listen("tauri://focus", () => load());
     const darkQuery = matchMedia("(prefers-color-scheme: dark)");
     const onSchemeChange = () => snap && applyTheme(snap.settings.theme);
     darkQuery.addEventListener("change", onSchemeChange);
     return () => {
       unlisten.then((stop) => stop());
+      unlistenUpdate.then((stop) => stop());
+      unlistenTab.then((stop) => stop());
       darkQuery.removeEventListener("change", onSchemeChange);
     };
   });
@@ -140,8 +145,38 @@
     api.saveSettings($state.snapshot(snap.settings));
   }
 
-  function toggleSetting(key: "showTray" | "stripTracking" | "warnLookalike" | "storeRecents") {
+  function toggleSetting(key: "showTray" | "stripTracking" | "warnLookalike" | "storeRecents" | "autoUpdate") {
     if (snap) setSetting(key, !snap.settings[key]);
+  }
+
+  // Updates
+
+  let update = $state<UpdateInfo | null>(null);
+  let updateBusy = $state<"" | "checking" | "installing">("");
+
+  async function checkForUpdates() {
+    updateBusy = "checking";
+    try {
+      update = await api.checkUpdate();
+      if (snap) snap.settings.lastUpdateCheck = Math.floor(Date.now() / 1000);
+      if (!update) flash("You're up to date");
+    } catch (e) {
+      flash(`Update check failed: ${e}`);
+    } finally {
+      updateBusy = "";
+    }
+  }
+
+  async function installUpdate() {
+    if (!update) return;
+    if (update.manual) return api.openExternal(update.url);
+    updateBusy = "installing";
+    try {
+      await api.installUpdate(); // restarts the app on success
+    } catch (e) {
+      flash(`Update failed: ${e}`);
+      updateBusy = "";
+    }
   }
 
   /** The OS may need the user to confirm, so poll until it reports us as default (or give up). */
@@ -411,6 +446,21 @@
               <div class="seg" role="group" aria-label="Recent limit">
                 {#each RECENT_LIMITS as n}<button aria-pressed={snap.settings.recentLimit === n} disabled={!snap.settings.storeRecents} onclick={() => setSetting("recentLimit", n)}>{n}</button>{/each}
               </div>
+            </div>
+          </div>
+          <div class="sec">Updates</div>
+          <div class="card">
+            <div class="srow"><span class="nm">Check for updates automatically<small>once a day; asks before installing</small></span>{@render toggle(snap.settings.autoUpdate, "Check for updates automatically", () => toggleSetting("autoUpdate"))}</div>
+            <div class="srow">
+              {#if update}
+                <span class="nm">Version {update.version} is available<small>you have v{snap.version}{update.manual ? " · installed with your package manager" : ""}</small></span>
+                <button class="btn pri" disabled={updateBusy !== ""} onclick={installUpdate}>
+                  {update.manual ? "Download" : updateBusy === "installing" ? "Installing…" : "Install & restart"}
+                </button>
+              {:else}
+                <span class="nm">v{snap.version}<small>{snap.settings.lastUpdateCheck ? `last checked ${new Date(snap.settings.lastUpdateCheck * 1000).toLocaleString()}` : "not checked yet"}</small></span>
+                <button class="btn" disabled={updateBusy !== ""} onclick={checkForUpdates}>{updateBusy === "checking" ? "Checking…" : "Check for updates"}</button>
+              {/if}
             </div>
           </div>
           <div class="sec">Danger zone</div>

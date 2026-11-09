@@ -10,27 +10,25 @@ const TRACKING_PARAMS: &[&str] = &[
 ];
 
 /// Returns (cleaned_url, number_of_params_removed).
+///
+/// Works on the raw query text and only drops whole `key=value` pieces, so the rest of the
+/// query keeps its exact encoding (signed links such as S3 or OAuth URLs stay valid).
 pub fn strip_tracking(raw: &str) -> (String, usize) {
     let Ok(mut parsed) = Url::parse(raw) else { return (raw.into(), 0) };
-    let pairs: Vec<(String, String)> = parsed.query_pairs().into_owned().collect();
-    if pairs.is_empty() {
-        return (raw.into(), 0);
-    }
-    let keep: Vec<_> = pairs.iter().filter(|(key, _)| !is_tracking_param(key)).collect();
-    let removed = pairs.len() - keep.len();
+    let Some(query) = parsed.query() else { return (raw.into(), 0) };
+    let pieces: Vec<&str> = query.split('&').collect();
+    let keep: Vec<&str> = pieces.iter().copied().filter(|piece| !is_tracking_piece(piece)).collect();
+    let removed = pieces.len() - keep.len();
     if removed == 0 {
         return (raw.into(), 0);
     }
-    if keep.is_empty() {
-        parsed.set_query(None);
-    } else {
-        parsed.query_pairs_mut().clear().extend_pairs(keep);
-    }
+    let new_query = keep.join("&");
+    parsed.set_query(if new_query.is_empty() { None } else { Some(&new_query) });
     (parsed.into(), removed)
 }
 
-fn is_tracking_param(key: &str) -> bool {
-    let key = key.to_lowercase();
+fn is_tracking_piece(piece: &str) -> bool {
+    let key = piece.split('=').next().unwrap_or_default().to_lowercase();
     key.starts_with("utm_") || TRACKING_PARAMS.contains(&key.as_str())
 }
 
@@ -49,25 +47,35 @@ pub fn glob(pat: &str, text: &str) -> bool {
     rec(pat.as_bytes(), text.as_bytes())
 }
 
+/// A rule pattern is `host[/path]`. The host part is matched against the URL's host only and
+/// the path part against its path only, so a `*` in the host can never reach into the path:
+/// `*.figma.com` must not match `https://evil.com/x.figma.com/`.
 pub fn rule_matches(pattern: &str, raw: &str) -> bool {
     let Ok(parsed) = Url::parse(raw) else { return false };
     let host = parsed.host_str().unwrap_or("").trim_start_matches("www.");
-    let target = format!("{host}{}", parsed.path());
-    let mut pattern = pattern.trim().trim_start_matches("https://").trim_start_matches("http://").to_string();
-    if pattern.is_empty() {
+    let pattern = pattern.trim().trim_start_matches("https://").trim_start_matches("http://");
+    let (host_pattern, path_pattern) = match pattern.find('/') {
+        Some(slash) => (&pattern[..slash], &pattern[slash..]),
+        None => (pattern, "/*"),
+    };
+    if host_pattern.is_empty() {
         return false;
     }
-    if !pattern.contains('/') {
-        pattern.push_str("/*");
+    host_matches(host_pattern, host) && glob(path_pattern, parsed.path())
+}
+
+fn host_matches(pattern: &str, host: &str) -> bool {
+    // `*.foo.com` means foo.com itself or any subdomain of it.
+    if let Some(apex) = pattern.strip_prefix("*.")
+        && !apex.contains('*')
+    {
+        let host = host.to_ascii_lowercase();
+        let apex = apex.to_ascii_lowercase();
+        return host == apex || host.ends_with(&format!(".{apex}"));
     }
-    if glob(&pattern, &target) {
-        return true;
-    }
-    // `*.foo.com` should also match apex `foo.com`.
-    match pattern.strip_prefix("*.") {
-        Some(apex_pattern) => glob(apex_pattern, &target),
-        None => false,
-    }
+    // Any other wildcard stays inside the host: it may not match across a dot boundary
+    // into another domain, but since the path is matched separately it can't reach the path.
+    glob(pattern, host)
 }
 
 pub fn find_rule<'a>(rules: &'a [Rule], url: &str) -> Option<&'a Rule> {
@@ -107,17 +115,24 @@ pub fn lookalike(raw: &str) -> Option<String> {
     if labels.len() < 2 {
         return None;
     }
-    let apex = labels[labels.len() - 2];
-    if BRANDS.contains(&apex) {
+    // The registrable name: `paypal` in `www.paypal.com`, and also in `paypal.co.uk`.
+    let apex_index = if labels.len() >= 3 && is_second_level_suffix(labels[labels.len() - 2]) {
+        labels.len() - 3
+    } else {
+        labels.len() - 2
+    };
+    if BRANDS.contains(&labels[apex_index]) {
         return None; // the real brand domain
     }
     // Check every label except the TLD, splitting on hyphens so `paypal-secure` is caught.
-    for label in &labels[..labels.len() - 1] {
+    // A brand name as a subdomain of some other site (`paypal.evil.com`) is suspicious too.
+    for (index, label) in labels[..labels.len() - 1].iter().enumerate() {
         let hyphenated = label.contains('-');
+        let above_apex = index < apex_index;
         for part in label.split('-').filter(|p| !p.is_empty()) {
             for brand in BRANDS {
                 let disguised = part != *brand && deconfuse(part) == deconfuse(brand);
-                let embedded = hyphenated && part == *brand;
+                let embedded = (hyphenated || above_apex) && part == *brand;
                 if disguised || embedded {
                     return Some(format!("{brand}.com"));
                 }
@@ -125,6 +140,12 @@ pub fn lookalike(raw: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Common second-level registry suffixes (`co.uk`, `com.au`, …). A rough stand-in for the
+/// public-suffix list, good enough to find the brand label of a country domain.
+fn is_second_level_suffix(label: &str) -> bool {
+    matches!(label, "co" | "com" | "org" | "net" | "ac" | "gov" | "edu" | "ne" | "or")
 }
 
 #[cfg(test)]
@@ -138,6 +159,20 @@ mod tests {
         let (u, n) = strip_tracking("https://a.com/x?utm_source=t");
         assert_eq!((u.as_str(), n), ("https://a.com/x", 1));
         assert_eq!(strip_tracking("https://a.com/?q=1").1, 0);
+        // The kept parameters keep their exact encoding.
+        let (u, n) = strip_tracking("https://a.com/x?q=a%20b&flag&utm_medium=x&sig=a%2Bb");
+        assert_eq!((u.as_str(), n), ("https://a.com/x?q=a%20b&flag&sig=a%2Bb", 1));
+    }
+
+    #[test]
+    fn rule_wildcards_stay_in_the_host() {
+        assert!(!rule_matches("*.figma.com", "https://evil.com/x.figma.com/"));
+        assert!(!rule_matches("*.figma.com", "https://evil.com/login.figma.com/file"));
+        assert!(!rule_matches("*.figma.com", "https://figma.com.evil.com/"));
+        assert!(!rule_matches("figma.com", "https://figma.com@evil.com/"));
+        assert!(rule_matches("*.figma.com", "https://a.b.figma.com/x"));
+        assert!(rule_matches("*.atlassian.net/wiki/*", "https://acme.atlassian.net/wiki/page"));
+        assert!(!rule_matches("*.atlassian.net/wiki/*", "https://acme.atlassian.net/jira"));
     }
 
     #[test]
@@ -158,5 +193,9 @@ mod tests {
         assert_eq!(lookalike("https://github.com/x"), None);
         assert_eq!(lookalike("https://example.org/"), None);
         assert!(lookalike("https://xn--pypal-4ve.com/").is_some());
+        assert_eq!(lookalike("https://paypal.evil.com/").as_deref(), Some("paypal.com"));
+        assert_eq!(lookalike("https://paypal.com.evil.net/").as_deref(), Some("paypal.com"));
+        assert_eq!(lookalike("https://www.amazon.co.uk/"), None);
+        assert_eq!(lookalike("https://mail.google.com/"), None);
     }
 }

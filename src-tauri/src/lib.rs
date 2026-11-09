@@ -6,6 +6,7 @@ mod config;
 mod icons;
 mod platform;
 mod tray;
+mod updates;
 mod urls;
 
 use config::Config;
@@ -40,12 +41,19 @@ struct AppState {
 
 /* ------------------------------------------------------------ url intake */
 
-/// Accepts http(s)/file URLs as-is and turns a local HTML file path into a file:// URL.
+/// Accepts http(s) URLs and local file:// URLs, and turns a local HTML file path into a
+/// file:// URL. The URL is parsed and re-serialised, so the rule check, the picker and the
+/// browser all see exactly the same link.
 fn url_from_arg(arg: &str) -> Option<String> {
-    let lower = arg.to_lowercase();
-    if lower.starts_with("http://") || lower.starts_with("https://") || lower.starts_with("file://") {
-        return Some(arg.to_string());
+    if let Ok(url) = url::Url::parse(arg) {
+        return match url.scheme() {
+            "http" | "https" => Some(url.into()),
+            // file://server/share would make the browser reach out over SMB; local files only.
+            "file" if matches!(url.host_str(), None | Some("") | Some("localhost")) => Some(url.into()),
+            _ => None,
+        };
     }
+    let lower = arg.to_lowercase();
     let path = std::path::Path::new(arg);
     let is_html = lower.ends_with(".html") || lower.ends_with(".htm") || lower.ends_with(".xhtml");
     if !(is_html && path.is_file()) {
@@ -98,8 +106,10 @@ fn open_in_picker(app: &AppHandle, raw: &str) {
     let _ = app.emit_to(app_windows::PICKER, "picker:show", pending);
 }
 
+/// Our own flags are only honoured as the sole argument (`pickmybrowser --background`), so a
+/// link can never smuggle one in next to a URL.
 fn has_flag(args: &[String], flag: &str) -> bool {
-    args.iter().any(|a| a == flag)
+    args.len() == 2 && args[1] == flag
 }
 
 /// `first_run` is false when the args were forwarded from a second instance.
@@ -179,6 +189,8 @@ pub fn run() {
                 .args(["--background"])
                 .build(),
         )
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(updates::UpdateState::default())
         .manage(AppState { cfg: Mutex::new(load_config()), pending: Mutex::new(None) })
         .invoke_handler(tauri::generate_handler![
             commands::snapshot,
@@ -200,6 +212,9 @@ pub fn run() {
             commands::open_external,
             commands::browser_icons,
             commands::uninstall_app,
+            commands::update_status,
+            commands::check_update,
+            commands::install_update,
         ])
         .setup(move |app| {
             #[cfg(target_os = "macos")]
@@ -207,6 +222,7 @@ pub fn run() {
             let handle = app.handle();
             if !e2e {
                 tray::setup(handle)?;
+                updates::start_background_checks(handle);
             }
             // Pre-create the picker so it appears instantly when the first link arrives.
             app_windows::picker(handle);
@@ -225,7 +241,9 @@ pub fn run() {
         #[cfg(target_os = "macos")]
         RunEvent::Opened { urls } => {
             for url in urls {
-                open_in_picker(_app, url.as_str());
+                if let Some(url) = url_from_arg(url.as_str()) {
+                    open_in_picker(_app, &url);
+                }
             }
         }
         RunEvent::ExitRequested { api, code: None, .. } => {

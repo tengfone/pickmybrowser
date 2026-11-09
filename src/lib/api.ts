@@ -41,6 +41,16 @@ export interface Settings {
   ruleCountdownMs: number;
   showTray: boolean;
   onboarded: boolean;
+  autoUpdate: boolean;
+  lastUpdateCheck: number;
+}
+
+export interface UpdateInfo {
+  version: string;
+  notes: string | null;
+  /** This install can't update itself (Linux deb/rpm): link to `url` instead. */
+  manual: boolean;
+  url: string;
 }
 
 export interface Snapshot {
@@ -87,6 +97,9 @@ export const api = {
   uninstallApp: () => invoke<void>("uninstall_app"),
   openSettings: () => invoke("open_settings"),
   openExternal: (url: string) => invoke("open_external", { url }),
+  updateStatus: () => invoke<UpdateInfo | null>("update_status"),
+  checkUpdate: () => invoke<UpdateInfo | null>("check_update"),
+  installUpdate: () => invoke<void>("install_update"),
 };
 
 /** Keys that pick a profile once a browser's profile list is expanded. */

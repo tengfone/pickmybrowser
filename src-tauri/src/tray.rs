@@ -55,6 +55,11 @@ fn on_menu_item(app: &AppHandle, id: &str) {
     let recent_index = match id {
         "quit" => return app.exit(0),
         "settings" => return app_windows::show_settings(app),
+        "update" => {
+            app_windows::show_settings(app);
+            let _ = tauri::Emitter::emit(app, "settings:tab", "general");
+            return;
+        }
         "reopen" => Some(0),
         _ => id.strip_prefix("recent:").and_then(|i| i.parse().ok()),
     };
@@ -88,5 +93,12 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let quit = MenuItem::with_id(app, "quit", "Quit PickMyBrowser", true, None::<&str>)?;
     let separator_1 = PredefinedMenuItem::separator(app)?;
     let separator_2 = PredefinedMenuItem::separator(app)?;
-    Menu::with_items(app, &[&reopen, &recents_menu, &separator_1, &settings, &separator_2, &quit])
+    let menu = Menu::with_items(app, &[&reopen, &recents_menu, &separator_1, &settings, &separator_2, &quit])?;
+    // A found update is offered here too; it opens Settings, which asks before installing.
+    if let Some(update) = crate::updates::available(app) {
+        let label = format!("Update to v{} available…", update.version);
+        menu.insert(&MenuItem::with_id(app, "update", label, true, None::<&str>)?, 0)?;
+        menu.insert(&PredefinedMenuItem::separator(app)?, 1)?;
+    }
+    Ok(menu)
 }

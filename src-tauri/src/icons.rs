@@ -13,7 +13,9 @@ fn cache_dir() -> PathBuf {
 /// re-extracted when that changes (update, reinstall).
 fn cache_file_name(b: &Browser) -> String {
     // FNV-1a: stable across runs and Rust versions, unlike `DefaultHasher`.
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    // Not the textbook FNV offset basis: this is the value earlier releases used, kept so
+    // existing icon cache file names stay valid.
+    let mut hash: u64 = 0x1465_0fb0_739d_0383;
     for byte in b.exec.bytes() {
         hash = (hash ^ byte as u64).wrapping_mul(0x0100_0000_01b3);
     }

@@ -12,11 +12,22 @@
   "app": {
     "windows": [],
     "security": {
-      "csp": null
+      "csp": {
+        "script-src": "'self'",
+        "style-src": "'self' 'unsafe-inline'",
+        "connect-src": "ipc: http://ipc.localhost",
+        "font-src": "'self'",
+        "form-action": "'none'",
+        "default-src": "'self'",
+        "img-src": "'self' data:",
+        "base-uri": "'none'",
+        "object-src": "'none'"
+      }
     }
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": [
       "nsis",
       "app",
@@ -51,6 +62,17 @@
     },
     "macOS": {
       "minimumSystemVersion": "12.0"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEY4QkZCNzNFRjg1MEVCNzIKUldSeTYxRDRQcmUvK0NyMzFoT0hVYXRORTE1VkJPVGhjV1ppTVVyR09XMXBXYlFKYzZHRWZBVTkK",
+      "endpoints": [
+        "https://github.com/tengfone/pickmybrowser/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   },
   "mainBinaryName": "pickmybrowser"

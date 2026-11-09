@@ -160,20 +160,29 @@ jobs:
           fi
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
-      # Unsigned build; the steps below name and upload the assets.
+      # Not OS code signing: this key only signs the in-app updater bundles (.sig files).
       - name: Build
         shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npx tauri build ${{ matrix.args }}
 
+      # Each updater bundle is copied with its .sig under the final asset name;
+      # the release job turns the .sig files into latest.json.
       - name: Collect release asset
         shell: bash
         run: |
           mkdir -p dist
+          take() { cp "$1" "dist/$2"; cp "$1.sig" "dist/$2.sig"; }
           case "${{ matrix.name }}" in
-            win)   cp src-tauri/target/release/bundle/nsis/*-setup.exe "dist/PickMyBrowser-Setup-$VERSION.exe" ;;
-            mac-*) ditto -c -k --keepParent "src-tauri/target/${{ matrix.target }}/release/bundle/macos/PickMyBrowser.app" "dist/PickMyBrowser-$VERSION-${{ matrix.name }}.zip" ;;
+            win)   take "$(ls src-tauri/target/release/bundle/nsis/*-setup.exe)" "PickMyBrowser-Setup-$VERSION.exe" ;;
+            mac-*)
+              MACOS="src-tauri/target/${{ matrix.target }}/release/bundle/macos"
+              ditto -c -k --keepParent "$MACOS/PickMyBrowser.app" "dist/PickMyBrowser-$VERSION-${{ matrix.name }}.zip"
+              take "$MACOS/PickMyBrowser.app.tar.gz" "PickMyBrowser-$VERSION-${{ matrix.name }}.app.tar.gz" ;;
             linux)
-              cp src-tauri/target/release/bundle/appimage/*.AppImage "dist/PickMyBrowser-$VERSION.AppImage"
+              take "$(ls src-tauri/target/release/bundle/appimage/*.AppImage)" "PickMyBrowser-$VERSION.AppImage"
               cp src-tauri/target/release/bundle/deb/*.deb "dist/PickMyBrowser-$VERSION-amd64.deb"
               cp src-tauri/target/release/bundle/rpm/*.rpm "dist/PickMyBrowser-$VERSION-x86_64.rpm" ;;
           esac
@@ -229,7 +238,9 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p release
-          find artifacts -type f \( -name "*.exe" -o -name "*.zip" -o -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" \) -exec mv {} release/ \;
+          find artifacts -type f \( -name "*.exe" -o -name "*.zip" -o -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.gz" -o -name "*.sig" \) -exec mv {} release/ \;
+          node scripts/updater-manifest.cjs release "${GITHUB_REF_NAME#v}" "$GITHUB_REF_NAME" > release/latest.json
+          cat release/latest.json
           ls -la release
 
       - name: Generate release notes

@@ -135,7 +135,10 @@ pub fn save_settings(app: AppHandle, st: State<AppState>, settings: Settings) {
         if !settings.store_recents {
             cfg.recents.clear();
         }
+        // The backend owns the check time; the frontend copy may be stale.
+        let last_update_check = cfg.settings.last_update_check;
         cfg.settings = settings;
+        cfg.settings.last_update_check = last_update_check;
         let limit = cfg.settings.recent_limit.max(1);
         cfg.recents.truncate(limit);
         cfg.save();
@@ -207,6 +210,13 @@ pub fn uninstall_app(app: AppHandle) -> Result<(), String> {
 /// Used for About links. Goes through the OS default browser, which may be us; that's fine.
 #[tauri::command]
 pub fn open_external(url: String) -> Result<(), String> {
+    // `cmd /C start` interprets &, |, ^ etc., so only accept plain https links (the About
+    // page's GitHub links) and nothing that the shell could read as a second command.
+    let parsed = url::Url::parse(&url).map_err(|e| e.to_string())?;
+    let shell_safe = url.chars().all(|c| c.is_ascii_alphanumeric() || "-._~:/?#=%+,@".contains(c));
+    if parsed.scheme() != "https" || !shell_safe {
+        return Err("only plain https links can be opened".into());
+    }
     let mut cmd = if cfg!(windows) {
         let mut c = std::process::Command::new("cmd");
         c.args(["/C", "start", ""]);
@@ -218,4 +228,22 @@ pub fn open_external(url: String) -> Result<(), String> {
     };
     cmd.arg(&url);
     cmd.spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
+/* ---------------------------------------------------------------- updates */
+
+/// The update found by the last check (background or manual), if any.
+#[tauri::command]
+pub fn update_status(app: AppHandle) -> Option<crate::updates::UpdateInfo> {
+    crate::updates::available(&app)
+}
+
+#[tauri::command]
+pub async fn check_update(app: AppHandle) -> Result<Option<crate::updates::UpdateInfo>, String> {
+    crate::updates::check(&app).await
+}
+
+#[tauri::command]
+pub async fn install_update(app: AppHandle) -> Result<(), String> {
+    crate::updates::install(&app).await
 }
