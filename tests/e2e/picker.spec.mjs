@@ -69,7 +69,10 @@ describe('Picker', () => {
       const { PhysicalPosition } = window.__TAURI__.dpi;
       const w = await WebviewWindow.getByLabel('picker');
       await w.setPosition(new PhysicalPosition(300, 200));
+      await w.setFocus();
+      document.querySelector('section.picker').focus();
     });
+    await browser.pause(200);
     const before = await position();
     await browser.keys('ArrowRight');
     await expect($$('ul.list li.row.sub')).toBeElementsArrayOfSize(2);
