@@ -1,0 +1,68 @@
+@import "@fontsource/ibm-plex-sans/latin-400.css";
+@import "@fontsource/ibm-plex-sans/latin-500.css";
+@import "@fontsource/ibm-plex-sans/latin-600.css";
+@import "@fontsource/ibm-plex-sans/latin-700.css";
+@import "@fontsource/jetbrains-mono/latin-400.css";
+@import "@fontsource/jetbrains-mono/latin-500.css";
+@import "@fontsource/jetbrains-mono/latin-600.css";
+
+:root {
+  --sig: #c8381c; --sig-h: #b33018; --sig-p: #9c2914;
+  --font: "IBM Plex Sans", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+  --rad: 10px;
+  color-scheme: light dark;
+}
+:root.dark {
+  --bg: #17181a; --surf: #1f2023; --surf2: #26282c; --line: #303237; --line2: #3f4248;
+  --tx: #ecedee; --tx2: #b2b5bb; --tx3: #9a9ea5; --sel: #2e2b2a; --sigtx: #ff8266;
+  --ring: #7fb2ff; --ok: #4cc08b; --warn: #d9a400; color-scheme: dark;
+}
+:root.light {
+  --bg: #f4f3f0; --surf: #ffffff; --surf2: #f7f6f3; --line: #e3e1dc; --line2: #cfccc5;
+  --tx: #17181a; --tx2: #45484e; --tx3: #5e6168; --sel: #fbede9; --sigtx: #a82e16;
+  --ring: #1f5fcc; --ok: #1e7a50; --warn: #9a7300; color-scheme: light;
+}
+/* per-OS skins */
+:root[data-os="windows"] { --rad: 8px; }
+:root[data-os="windows"].dark { --surf: #202124; --surf2: #2a2b2e; }
+:root[data-os="windows"].light { --surf: #f9f9f9; --surf2: #f1f1f1; }
+:root[data-os="macos"] { --rad: 12px; }
+:root[data-os="linux"] { --rad: 12px; }
+:root[data-os="linux"].dark { --surf: #242424; --surf2: #2e2e2e; --line: #363636; }
+:root[data-os="linux"].light { --surf: #fafafa; --surf2: #f0f0f0; --line: #e0e0e0; }
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { font: 14px/20px var(--font); color: var(--tx); -webkit-font-smoothing: antialiased; user-select: none; cursor: default; }
+button, input, select { font: inherit; color: inherit; }
+input, textarea { user-select: text; }
+::selection { background: color-mix(in srgb, var(--sig) 35%, transparent); }
+
+.kbd {
+  display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 5px;
+  font: 500 11px/1 var(--mono); color: var(--tx2); background: var(--surf2);
+  border: 1px solid var(--line2); border-bottom-width: 2px; border-radius: 4px; flex: none;
+}
+.btn {
+  font: 500 13px/20px var(--font); padding: 4px 12px; border-radius: 6px; border: 1px solid var(--line2);
+  background: var(--surf2); color: var(--tx); cursor: pointer; display: inline-flex; gap: 8px; align-items: center;
+}
+.btn:hover { background: var(--sel); }
+.btn:disabled { opacity: .5; cursor: default; }
+.btn.pri { background: var(--sig); border-color: var(--sig); color: #fff; }
+.btn.pri:hover { background: var(--sig-h); }
+.btn.pri:active { background: var(--sig-p); }
+.btn.pri .kbd { background: rgba(0,0,0,.22); border-color: rgba(0,0,0,.3); color: #fff; }
+.btn.ghost { background: none; border-color: transparent; color: var(--tx2); }
+.btn.ghost:hover { background: var(--surf2); color: var(--tx); }
+.btn.danger { color: var(--sigtx); }
+.btn .kbd { height: 18px; }
+:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.chip { flex: none; font: 600 11px/16px var(--mono); border-radius: 4px; padding: 0 5px; display: inline-flex; gap: 4px; align-items: center; }
+.chip.rule { background: var(--sig); color: #fff; }
+.chip.priv { border: 1px solid var(--tx2); color: var(--tx); }
+.chip.info { border: 1px solid var(--line2); color: var(--tx2); font-weight: 500; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
