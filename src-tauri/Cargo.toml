@@ -34,7 +34,7 @@ winreg = "0.55"
 [target.'cfg(target_os = "macos")'.dependencies]
 plist = "1"
 core-foundation = "0.10"
-icns = "0.3"
+icns = "0.5"
 
 [profile.release]
 codegen-units = 1
