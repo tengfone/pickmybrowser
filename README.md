@@ -10,6 +10,7 @@ Works on **Windows**, **macOS** and **Linux**.
 
 ### ⚡ Fast picking
 - **One keypress.** Each browser gets a number from `1` to `9`. You can also use the arrow keys or click.
+- **Your own keys.** Give a browser a key you'll remember, like `C` for Chrome or `F` for Firefox. In Settings → Browsers, click the browser's number and press the key. The others keep their numbers.
 - **Private windows.** Hold `Shift` while picking to open the link in a private or incognito window.
 - **Profiles.** Press `→` on a browser to list its profiles (Chrome, Edge, Brave, Firefox and more), then press the profile's letter.
 - **Type to filter.** If you have more than nine browsers, start typing to narrow the list.
@@ -34,6 +35,7 @@ Works on **Windows**, **macOS** and **Linux**.
 | Key | Action |
 | --- | --- |
 | `1`–`9` | Open in that browser |
+| Your key (e.g. `C`) | Open the browser you gave that key |
 | `↑` / `↓`, `Enter` | Move through the list and open the selected browser |
 | `Shift` + pick | Open in a private window |
 | `→` | Show the browser's profiles |
