@@ -28,15 +28,15 @@ describe('Settings', () => {
   it('click a key, press a letter: the browser gets its own key', async () => {
     const chip = () => $$('main .srow[data-browser-index]')[0].$('button.keychip');
     await (await chip()).click();
-    await expect(await chip()).toHaveText('Press a key…');
+    await expect(await chip()).toHaveText('…');
     await browser.keys('c');
     await browser.waitUntil(async () => (await invoke('snapshot')).browsers[0].hotkey === 'c', {
       timeoutMsg: 'key was not saved',
     });
     await expect(await chip()).toHaveText('C');
-    // Backspace while choosing puts it back to its number.
-    await (await chip()).click();
-    await browser.keys('Backspace');
+    // The × next to a custom key puts it back to its number.
+    await $$('main .srow[data-browser-index]')[0].moveTo();
+    await $$('main .srow[data-browser-index]')[0].$('button.keyreset').click();
     await browser.waitUntil(async () => !(await invoke('snapshot')).browsers[0].hotkey);
     await expect(await chip()).toHaveText('1');
   });

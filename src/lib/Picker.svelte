@@ -422,7 +422,7 @@
       {#if mode === "rule"}
         <span><span class="kbd">Esc</span> show all browsers</span>
       {:else}
-        {#if hasCustomKeys}<span>press a browser's key to open</span>
+        {#if hasCustomKeys}<span>press a key to open</span>
         {:else}<span><span class="kbd">1</span>–<span class="kbd">9</span> open</span>{/if}
         <span><span class="kbd">{os === "macos" ? "⇧" : "Shift"}</span> {privateHeld ? "held" : "private"}</span>
         {#if expandedId}<span><span class="kbd">Q</span><span class="kbd">W</span><span class="kbd">E</span> profile</span>

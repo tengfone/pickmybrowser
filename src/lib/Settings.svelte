@@ -108,12 +108,19 @@
       return;
     }
     const key = (/^Digit([0-9])$/.exec(e.code)?.[1] ?? /^Key([A-Z])$/.exec(e.code)?.[1] ?? "").toLowerCase();
-    if (!key) return flash("Use a letter or a number");
+    if (!key) return flash("Keys can be a letter or a number");
     const owner = snap.browsers.find((b) => b !== browser && b.hotkey === key);
     if (owner) owner.hotkey = null; // a key belongs to one browser; the newest choice wins
     browser.hotkey = key;
     saveBrowsers();
-    flash(owner ? `${key.toUpperCase()} moved from ${owner.name}` : `${browser.name}: ${key.toUpperCase()}`);
+    const label = key.toUpperCase();
+    flash(owner ? `${browser.name} now opens with ${label} (was ${owner.name}'s)` : `${browser.name} now opens with ${label}`);
+  }
+
+  function resetKey(b: Browser) {
+    b.hotkey = null;
+    saveBrowsers();
+    flash(`${b.name} is back to its number`);
   }
 
   function endDrag() {
@@ -366,7 +373,7 @@
       <main class="pane">
         {#if tab === "browsers"}
           <div class="head">
-            <div><h1>Browsers</h1><p class="sub">Drag to reorder. Order sets the 1–9 hotkeys.</p></div>
+            <div><h1>Browsers</h1><p class="sub">Drag to reorder. Each browser opens with its key in the picker.</p></div>
             <button class="btn" onclick={rescan} disabled={scanning}>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" class:spin={scanning}><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5" /></svg>
               {scanning ? "Scanning…" : "Rescan"}
@@ -389,27 +396,34 @@
               >
                 <span class="grip" aria-hidden="true">⠿</span>
                 <Glyph id={b.id} family={b.family} name={b.name} />
-                <span class="nm">{b.name}<small title={b.exec}>{b.exec}{b.profiles.length ? ` · ${b.profiles.length} profiles` : ""}</small></span>
+                <span class="nm">{b.name}<small title={b.exec}>{#if recordingKey === b.id}<em class="rechint">Press a letter or number · Esc to cancel</em>{:else}{b.exec}{b.profiles.length ? ` · ${b.profiles.length} profiles` : ""}{/if}</small></span>
                 <span class="mv">
                   <button class="icon" aria-label="Move up" disabled={i === 0} onclick={() => move(i, i - 1)}>↑</button>
                   <button class="icon" aria-label="Move down" disabled={i === snap.browsers.length - 1} onclick={() => move(i, i + 1)}>↓</button>
                 </span>
-                <button
-                  class="keychip"
-                  class:custom={!!b.hotkey}
-                  class:rec={recordingKey === b.id}
-                  disabled={!b.enabled}
-                  title={b.hotkey ? "Your key. Click to change; Backspace resets to the number." : "Click, then press a letter or number"}
-                  aria-label={`Picker key for ${b.name}`}
-                  onclick={() => (recordingKey = recordingKey === b.id ? null : b.id)}
-                >{recordingKey === b.id ? "Press a key…" : hotkeyLabel(b)}</button>
+                <span class="keyset">
+                  {#if b.hotkey && recordingKey !== b.id}
+                    <button class="keyreset" title="Use its number instead" aria-label={`Reset ${b.name}'s key to its number`} onclick={() => resetKey(b)}>
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+                    </button>
+                  {/if}
+                  <button
+                    class="keychip"
+                    class:custom={!!b.hotkey}
+                    class:rec={recordingKey === b.id}
+                    disabled={!b.enabled}
+                    title={b.enabled ? "Change key" : "Turn the browser on to give it a key"}
+                    aria-label={recordingKey === b.id ? `Press a new key for ${b.name}` : `${b.name} opens with ${hotkeyLabel(b)}. Change key`}
+                    onclick={() => (recordingKey = recordingKey === b.id ? null : b.id)}
+                  >{recordingKey === b.id ? "…" : hotkeyLabel(b)}</button>
+                </span>
                 {@render toggle(b.enabled, `Show ${b.name} in picker`, () => toggleBrowser(b))}
               </div>
             {:else}
               <div class="srow"><span class="nm muted">No browsers found. Click Rescan.</span></div>
             {/each}
           </div>
-          <p class="hint">Click a key to give a browser its own, like <span class="kbd">C</span> for Chrome; Backspace while choosing resets it to its number.</p>
+          <p class="hint">Browsers are numbered 1–9 in this order. Click a number to choose a key you'll remember instead, like <span class="kbd">C</span> for Chrome.</p>
           <p class="hint">Profiles are detected automatically for Chromium and Firefox browsers. Press <span class="kbd">→</span> in the picker to choose one.</p>
 
         {:else if tab === "rules"}
@@ -570,17 +584,27 @@
   .srow:first-child { border-top: 0; }
   .srow.off :global(.ico), .srow.off .nm { opacity: 0.55; }
   .srow.over { box-shadow: inset 0 2px 0 var(--sig); }
+  .keyset { display: inline-flex; align-items: center; gap: 4px; flex: none; }
   /* The browser's picker key; clickable to choose your own. */
   .keychip {
-    min-width: 22px; height: 22px; padding: 0 6px; flex: none; cursor: pointer;
-    font: 500 11px/1 var(--mono); color: var(--tx2); background: var(--surf2);
-    border: 1px solid var(--line2); border-bottom-width: 2px; border-radius: 4px;
+    min-width: 24px; height: 24px; padding: 0 6px; flex: none; cursor: pointer;
+    font: 600 12px/1 var(--mono); color: var(--tx2); background: var(--surf2);
+    border: 1px solid var(--line2); border-bottom-width: 2px; border-radius: 5px;
+    transition: border-color 0.15s ease-out, color 0.15s ease-out;
   }
   .keychip:hover:not(:disabled) { border-color: var(--ring); color: var(--tx); }
-  .keychip.custom { color: var(--tx); border-color: var(--ring); font-weight: 700; }
-  .keychip.rec { color: var(--tx); border: 2px solid var(--ring); animation: pulse 1s ease-in-out infinite; }
+  .keychip.custom { color: var(--tx); border-color: var(--ring); }
+  .keychip.rec { color: var(--tx); border: 2px solid var(--ring); min-width: 28px; animation: pulse 1.2s ease-out infinite; }
   .keychip:disabled { opacity: 0.4; cursor: default; }
-  @keyframes pulse { 50% { opacity: 0.6; } }
+  .keyreset {
+    display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 50%;
+    background: none; color: var(--tx3); cursor: pointer; opacity: 0; transition: opacity 0.15s ease-out, color 0.15s ease-out;
+  }
+  .srow:hover .keyreset, .keyreset:focus-visible { opacity: 1; }
+  .keyreset:hover { color: var(--tx); background: var(--surf2); }
+  .rechint { font-style: normal; color: var(--tx); font-family: inherit; }
+  @keyframes pulse { 50% { border-color: var(--line2); } }
+  @media (prefers-reduced-motion: reduce) { .keychip.rec { animation: none; } }
   .srow[data-browser-index] { cursor: grab; user-select: none; touch-action: none; }
   .srow.dragging { cursor: grabbing; opacity: 0.6; }
   .grip { color: var(--tx3); font-size: 14px; }
