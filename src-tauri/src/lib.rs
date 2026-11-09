@@ -394,7 +394,7 @@ fn refresh_tray(app: &AppHandle) {
 fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     let menu = build_menu(app)?;
     let tray = TrayIconBuilder::with_id("main")
-        .icon(app.default_window_icon().cloned().expect("icon"))
+        .icon(tauri::include_image!("icons/tray.png"))
         .tooltip("PickMyBrowser")
         .menu(&menu)
         .show_menu_on_left_click(cfg!(target_os = "macos"))
