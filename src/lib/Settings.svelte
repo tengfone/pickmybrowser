@@ -12,6 +12,7 @@
   let dragFrom = $state<number | null>(null);
   let dragOver = $state<number | null>(null);
   let confirmReset = $state(false);
+  let confirmRemove = $state(false);
   let toast = $state("");
 
   const tabs = [
@@ -312,6 +313,10 @@
             <div class="srow"><span class="nm">Reset everything<small>browsers, rules, recents and preferences</small></span>
               {#if confirmReset}<button class="btn ghost" onclick={() => (confirmReset = false)}>Cancel</button><button class="btn pri" onclick={reset}>Reset</button>
               {:else}<button class="btn danger" onclick={() => (confirmReset = true)}>Reset all…</button>{/if}
+            </div>
+            <div class="srow"><span class="nm">Remove PickMyBrowser<small>removes default-browser registration, login item and all data, then quits{snap.os === "macos" ? "; then drag the app to the Bin" : ""}</small></span>
+              {#if confirmRemove}<button class="btn ghost" onclick={() => (confirmRemove = false)}>Cancel</button><button class="btn pri" onclick={() => api.uninstallApp()}>Remove &amp; quit</button>
+              {:else}<button class="btn danger" onclick={() => (confirmRemove = true)}>Remove</button>{/if}
             </div>
           </div>
 

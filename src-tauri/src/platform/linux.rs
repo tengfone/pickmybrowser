@@ -143,9 +143,46 @@ pub fn set_default() -> Result<(), String> {
 
 pub fn unregister() -> Result<(), String> {
     if let Some(p) = desktop_path() {
-        let _ = std::fs::remove_file(p);
+        let _ = std::fs::remove_file(&p);
+        let _ = Command::new("update-desktop-database").arg(p.parent().unwrap()).status();
+    }
+    // xdg-mime / xdg-settings record us in mimeapps.list; strip those entries.
+    let mut lists = vec![];
+    if let Some(c) = dirs::config_dir() {
+        lists.push(c.join("mimeapps.list"));
+    }
+    if let Some(d) = dirs::data_dir() {
+        lists.push(d.join("applications").join("mimeapps.list"));
+    }
+    for f in lists {
+        if let Ok(s) = std::fs::read_to_string(&f) {
+            let cleaned = strip_mimeapps(&s);
+            if cleaned != s {
+                let _ = std::fs::write(&f, cleaned);
+            }
+        }
     }
     Ok(())
+}
+
+/// Remove `pickmybrowser.desktop` from every association line; drop lines left empty.
+fn strip_mimeapps(s: &str) -> String {
+    let mut out = String::new();
+    for line in s.lines() {
+        match line.split_once('=') {
+            Some((k, v)) if !line.trim_start().starts_with('[') && v.contains(DESKTOP_ID) => {
+                let rest: Vec<&str> = v.split(';').filter(|x| !x.is_empty() && *x != DESKTOP_ID).collect();
+                if !rest.is_empty() {
+                    out.push_str(&format!("{k}={};\n", rest.join(";")));
+                }
+            }
+            _ => {
+                out.push_str(line);
+                out.push('\n');
+            }
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -157,6 +194,8 @@ mod tests {
         let (n, e, ok) = parse_desktop(s).unwrap();
         assert_eq!((n.as_str(), ok), ("Firefox", true));
         assert_eq!(split_exec(&e), ["/usr/lib/firefox/firefox"]);
+        let m = "[Default Applications]\nx-scheme-handler/http=pickmybrowser.desktop\nx-scheme-handler/https=pickmybrowser.desktop;firefox.desktop;\n[Added Associations]\ntext/html=firefox.desktop;\n";
+        assert_eq!(strip_mimeapps(m), "[Default Applications]\nx-scheme-handler/https=firefox.desktop;\n[Added Associations]\ntext/html=firefox.desktop;\n");
         assert_eq!(split_exec("flatpak run \"com.brave.Browser\" @@u %U @@"), ["flatpak", "run", "com.brave.Browser", "@@u", "@@"]);
     }
 }

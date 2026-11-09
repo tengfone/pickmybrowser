@@ -82,5 +82,11 @@ pub fn set_default() -> Result<(), String> {
 }
 
 pub fn unregister() -> Result<(), String> {
+    // Drop our LaunchServices registration so we no longer appear as a browser choice.
+    // If we were the default, macOS falls back to Safari once the app is gone.
+    const LSREGISTER: &str = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
+    if let Some(app) = std::env::current_exe().ok().and_then(|e| e.ancestors().find(|p| p.extension().is_some_and(|x| x == "app")).map(|p| p.to_path_buf())) {
+        let _ = std::process::Command::new(LSREGISTER).arg("-u").arg(app).status();
+    }
     Ok(())
 }

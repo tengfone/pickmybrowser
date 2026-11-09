@@ -118,6 +118,20 @@ pub fn unregister() -> Result<(), String> {
     if let Ok(k) = hk.open_subkey_with_flags(r"Software\RegisteredApplications", KEY_WRITE) {
         let _ = k.delete_value(APP);
     }
+    // Bookkeeping Windows itself writes once we were offered as a handler.
+    if let Ok(k) = hk.open_subkey_with_flags(r"Software\Microsoft\Windows\CurrentVersion\ApplicationAssociationToasts", KEY_READ | KEY_WRITE) {
+        let ours: Vec<String> = k.enum_values().filter_map(|v| v.ok()).map(|(n, _)| n).filter(|n| n.starts_with(PROG_ID)).collect();
+        for n in ours {
+            let _ = k.delete_value(n);
+        }
+    }
+    for ext in [".htm", ".html"] {
+        if let Ok(k) = hk.open_subkey_with_flags(format!(r"Software\Classes\{ext}\OpenWithProgids"), KEY_WRITE) {
+            let _ = k.delete_value(PROG_ID);
+        }
+    }
+    // The UserChoice keys are hash-protected; with our ProgID gone Windows falls back
+    // to its own default and asks the user, which is the intended behaviour.
     Ok(())
 }
 

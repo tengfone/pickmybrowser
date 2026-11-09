@@ -1,4 +1,5 @@
 mod browsers;
+mod cleanup;
 mod config;
 mod icons;
 mod platform;
@@ -14,7 +15,7 @@ use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
-use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
+use tauri_plugin_autostart::ManagerExt;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -353,6 +354,15 @@ fn open_settings(app: AppHandle) {
     show_settings(&app);
 }
 
+/// Settings → "Remove PickMyBrowser": wipe registrations, autostart and data, then quit.
+/// The app files themselves are removed by the OS uninstaller / Bin.
+#[tauri::command]
+fn uninstall_app(app: AppHandle) -> Result<(), String> {
+    cleanup::spawn_detached_uninstall()?;
+    app.exit(0);
+    Ok(())
+}
+
 #[tauri::command]
 fn open_external(url: String) -> Result<(), String> {
     // Used for About links; route through the OS default (which may be us — that's fine).
@@ -435,9 +445,13 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
 pub fn run() {
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--uninstall") {
-        let _ = platform::unregister();
-        let _ = std::fs::remove_dir_all(config::dir());
-        println!("PickMyBrowser registrations and settings removed. You can now delete the app.");
+        let left = cleanup::uninstall_all();
+        if left.is_empty() {
+            println!("PickMyBrowser registrations and settings removed.");
+        } else {
+            eprintln!("Could not remove: {left:?}");
+            std::process::exit(1);
+        }
         return;
     }
 
@@ -451,12 +465,17 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             handle_args(app, &argv, false);
         }))
-        .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--background"])))
+        .plugin(
+            tauri_plugin_autostart::Builder::new()
+                .app_name("PickMyBrowser")
+                .args(["--background"])
+                .build(),
+        )
         .manage(AppState { cfg: Mutex::new(cfg), pending: Mutex::new(None) })
         .invoke_handler(tauri::generate_handler![
             snapshot, pending, present_picker, dismiss, open_url, pick_url, rescan, save_browsers,
             save_rules, save_settings, clear_recents, set_default, is_default, set_launch_at_login,
-            reset_all, open_settings, open_external, browser_icons
+            reset_all, open_settings, open_external, browser_icons, uninstall_app
         ])
         .setup(move |app| {
             #[cfg(target_os = "macos")]

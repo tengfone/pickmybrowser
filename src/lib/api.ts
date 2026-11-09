@@ -39,6 +39,7 @@ export const api = {
   isDefault: () => invoke<boolean>("is_default"),
   setLaunchAtLogin: (on: boolean) => invoke("set_launch_at_login", { on }),
   resetAll: () => invoke<Browser[]>("reset_all"),
+  uninstallApp: () => invoke<void>("uninstall_app"),
   openSettings: () => invoke("open_settings"),
   openExternal: (url: string) => invoke("open_external", { url }),
 };
