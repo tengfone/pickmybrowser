@@ -55,6 +55,30 @@ describe('Picker', () => {
     expect(l.args).toContain('--profile-directory=Profile 1');
   });
 
+  it('opening the profile list keeps the window where it is', async () => {
+    await openLink('https://example.com/stay');
+    const position = () =>
+      browser.execute(async () => {
+        const w = await window.__TAURI__.webviewWindow.WebviewWindow.getByLabel('picker');
+        const p = await w.outerPosition();
+        return [p.x, p.y];
+      });
+    // Move the window away from the cursor, as if the mouse had wandered since it appeared.
+    await browser.execute(async () => {
+      const { WebviewWindow } = window.__TAURI__.webviewWindow;
+      const { PhysicalPosition } = window.__TAURI__.dpi;
+      const w = await WebviewWindow.getByLabel('picker');
+      await w.setPosition(new PhysicalPosition(300, 200));
+    });
+    const before = await position();
+    await browser.keys('ArrowRight');
+    await expect($$('ul.list li.row.sub')).toBeElementsArrayOfSize(2);
+    await browser.pause(300);
+    expect(await position()).toEqual(before);
+    await browser.keys('Escape');
+    await browser.keys('Escape');
+  });
+
   it('Escape closes without opening anything', async () => {
     await openLink('https://example.com/f');
     await browser.keys('Escape');

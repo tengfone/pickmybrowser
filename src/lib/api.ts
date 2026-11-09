@@ -81,6 +81,7 @@ export const api = {
   snapshot: () => invoke<Snapshot>("snapshot"),
   pending: () => invoke<Pending | null>("pending"),
   present: (width: number, height: number) => invoke("present_picker", { width, height }),
+  resize: (width: number, height: number) => invoke("resize_picker", { width, height }),
   dismiss: () => invoke("dismiss"),
   open: (url: string, browserId: string, profileId: string | null, incognito: boolean) =>
     invoke("open_url", { url, browserId, profileId, private: incognito }),

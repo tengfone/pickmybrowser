@@ -91,6 +91,27 @@ pub fn present_picker(app: &AppHandle, width: f64, height: f64, centered: bool) 
     Ok(())
 }
 
+/// Resizes the visible picker in place (e.g. a profile list opened). Unlike `present_picker`
+/// it never follows the cursor; it only nudges the window up/left if it would leave the screen.
+pub fn resize_picker(app: &AppHandle, width: f64, height: f64) -> Result<(), String> {
+    let window = picker(app);
+    let scale = window.scale_factor().map_err(|e| e.to_string())?;
+    let size = PhysicalSize::new((width * scale).round(), (height * scale).round());
+    let _ = window.set_size(size);
+    if let (Ok(pos), Ok(Some(monitor))) = (window.outer_position(), window.current_monitor()) {
+        let area = monitor.work_area();
+        let margin = 8.0 * scale;
+        let right = area.position.x as f64 + area.size.width as f64 - margin;
+        let bottom = area.position.y as f64 + area.size.height as f64 - margin;
+        let x = (pos.x as f64).min(right - size.width).max(area.position.x as f64 + margin);
+        let y = (pos.y as f64).min(bottom - size.height).max(area.position.y as f64 + margin);
+        if x.round() as i32 != pos.x || y.round() as i32 != pos.y {
+            let _ = window.set_position(PhysicalPosition::new(x.round() as i32, y.round() as i32));
+        }
+    }
+    Ok(())
+}
+
 pub fn show_settings(app: &AppHandle) {
     let window = match app.get_webview_window(SETTINGS) {
         Some(window) => window,

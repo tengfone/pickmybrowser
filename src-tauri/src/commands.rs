@@ -60,6 +60,11 @@ pub fn present_picker(app: AppHandle, st: State<AppState>, width: f64, height: f
 }
 
 #[tauri::command]
+pub fn resize_picker(app: AppHandle, width: f64, height: f64) -> Result<(), String> {
+    app_windows::resize_picker(&app, width, height)
+}
+
+#[tauri::command]
 pub fn dismiss(app: AppHandle) {
     app_windows::hide_picker(&app);
 }
@@ -210,16 +215,22 @@ pub fn uninstall_app(app: AppHandle) -> Result<(), String> {
 /// Used for About links. Goes through the OS default browser, which may be us; that's fine.
 #[tauri::command]
 pub fn open_external(url: String) -> Result<(), String> {
-    // `cmd /C start` interprets &, |, ^ etc., so only accept plain https links (the About
-    // page's GitHub links) and nothing that the shell could read as a second command.
+    // Only plain https links (the About page's links). On Windows the URL goes straight to
+    // the URL handler (no cmd, so no console flash and no shell parsing of & or |).
     let parsed = url::Url::parse(&url).map_err(|e| e.to_string())?;
-    let shell_safe = url.chars().all(|c| c.is_ascii_alphanumeric() || "-._~:/?#=%+,@".contains(c));
-    if parsed.scheme() != "https" || !shell_safe {
+    let plain = url.chars().all(|c| c.is_ascii_alphanumeric() || "-._~:/?#=%+,@".contains(c));
+    if parsed.scheme() != "https" || !plain {
         return Err("only plain https links can be opened".into());
     }
     let mut cmd = if cfg!(windows) {
-        let mut c = std::process::Command::new("cmd");
-        c.args(["/C", "start", ""]);
+        let mut c = std::process::Command::new("rundll32");
+        c.arg("url.dll,FileProtocolHandler");
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            c.creation_flags(CREATE_NO_WINDOW);
+        }
         c
     } else if cfg!(target_os = "macos") {
         std::process::Command::new("open")

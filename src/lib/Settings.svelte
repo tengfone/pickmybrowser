@@ -482,7 +482,10 @@
           <div class="row-gap">
             <button class="btn" onclick={() => api.openExternal("https://github.com/tengfone/PickMyBrowser")}>GitHub</button>
             <button class="btn" onclick={() => api.openExternal("https://github.com/tengfone/PickMyBrowser/issues/new")}>Report issue</button>
-            <button class="btn" onclick={() => api.openExternal("https://buymeacoffee.com/tengfone")}>Buy me a coffee</button>
+            <button class="bmc" onclick={() => api.openExternal("https://buymeacoffee.com/tengfone")}>
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M5 7h11v6a5 5 0 0 1-5 5H10a5 5 0 0 1-5-5V7Zm11 1.5h1.5a2.5 2.5 0 0 1 0 5H16v-1.6h1.5a.9.9 0 0 0 0-1.8H16V8.5ZM4 19.5h13V21H4v-1.5ZM8.2 2.6l1.2.7-.9 1.6-1.2-.7.9-1.6Zm3.3 0 1.2.7-.9 1.6-1.2-.7.9-1.6Z"/></svg>
+              Buy me a coffee
+            </button>
           </div>
           <div class="sec">Uninstall</div>
           <p class="hint">Run <code>PickMyBrowser --uninstall</code> to remove registrations and settings, then delete the app.</p>
@@ -543,6 +546,17 @@
   .ph { width: 20px; height: 20px; border-radius: 50%; background: var(--surf2); flex: none; }
   .about { margin: 16px 0; color: var(--tx2); max-width: 46ch; }
   .row-gap { display: flex; gap: 8px; flex-wrap: wrap; }
+  /* Buy Me a Coffee brand yellow; same in light and dark themes. */
+  .bmc {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: #ffdd00; color: #0d0c22; border: 0; border-radius: 8px;
+    padding: 6px 12px; font: inherit; font-weight: 600; cursor: pointer;
+    box-shadow: 0 1px 0 rgb(0 0 0 / 0.15);
+    transition: transform 0.12s ease, filter 0.12s ease;
+  }
+  .bmc:hover { filter: brightness(1.05); transform: translateY(-1px); }
+  .bmc:active { transform: translateY(0); }
+  .bmc:focus-visible { outline: 2px solid #0d0c22; outline-offset: 2px; }
   .ok { font: 11px var(--mono); color: var(--ok); }
   .spin { animation: spin 0.8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }

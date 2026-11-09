@@ -196,6 +196,7 @@ pub fn run() {
             commands::snapshot,
             commands::pending,
             commands::present_picker,
+            commands::resize_picker,
             commands::dismiss,
             commands::open_url,
             commands::pick_url,

@@ -91,10 +91,10 @@
     countdownFrame = requestAnimationFrame(step);
   }
 
-  /** Let the window follow the card size after layout changes. */
+  /** Let the window follow the card size after layout changes, without moving it. */
   async function resize() {
     await tick();
-    if (card) await api.present(card.offsetWidth, card.offsetHeight);
+    if (card) await api.resize(card.offsetWidth, card.offsetHeight);
   }
 
   async function open(b: Browser, profileId: string | null = null, incognito = privateHeld) {
