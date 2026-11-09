@@ -263,10 +263,15 @@ async function sceneRuleCountdown() {
 }
 
 async function sceneSettings() {
-  state.caption = 'Browsers, profiles, rules and recents in <em>Settings</em>';
+  state.caption = 'Give browsers <em>your own keys</em>. Rules, profiles and recents in Settings.';
+  // Show the custom-key feature: Chrome gets C, Firefox gets F.
+  const { browsers } = await invoke('snapshot');
+  for (const b of browsers) b.hotkey = { chrome: 'c', firefox: 'f' }[b.id] ?? null;
+  await invoke('save_browsers', { browsers });
   await use('settings');
-  await $('nav.side').$('button*=Rules').click();
-  await browser.pause(250);
+  await browser.refresh();
+  await $('nav.side').$('button*=Browsers').click();
+  await browser.pause(400);
   let img = decode(await browser.takeScreenshot());
   img = scale(img, Math.min(1, 1000 / img.width, 600 / img.height));
   moveTo(1100, 700, 0.4);
