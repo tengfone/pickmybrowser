@@ -2,10 +2,10 @@
   import "../app.css";
   import { onMount } from "svelte";
   import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-  import Picker from "$lib/Picker.svelte";
-  import Settings from "$lib/Settings.svelte";
-  import { api, applyOs, applyTheme } from "$lib/api";
-  import { loadIcons } from "$lib/icons.svelte";
+  import Picker from "../lib/Picker.svelte";
+  import Settings from "../lib/Settings.svelte";
+  import { api, applyOs, applyTheme } from "../lib/api";
+  import { loadIcons } from "../lib/icons.svelte";
 
   const label = getCurrentWebviewWindow().label;
 
